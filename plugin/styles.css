@@ -1,0 +1,69 @@
+/* Note Publisher Plugin Styles */
+
+.note-publisher-settings {
+    padding: 10px;
+}
+
+.note-publisher-settings .setting-item {
+    border-bottom: 1px solid var(--background-modifier-border);
+    padding: 15px 0;
+}
+
+.note-publisher-modal {
+    padding: 20px;
+}
+
+.note-publisher-modal h2 {
+    margin-bottom: 15px;
+}
+
+.note-publisher-modal .image-list {
+    max-height: 200px;
+    overflow-y: auto;
+    margin: 10px 0;
+    padding: 10px;
+    background: var(--background-secondary);
+    border-radius: 5px;
+}
+
+.note-publisher-modal .image-item {
+    display: flex;
+    align-items: center;
+    padding: 5px 0;
+}
+
+.note-publisher-modal .image-item.missing {
+    color: var(--text-error);
+}
+
+.note-publisher-modal .image-item.found {
+    color: var(--text-success);
+}
+
+.note-publisher-modal .button-container {
+    display: flex;
+    justify-content: flex-end;
+    gap: 10px;
+    margin-top: 20px;
+}
+
+.note-publisher-loading {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.note-publisher-loading .spinner {
+    width: 16px;
+    height: 16px;
+    border: 2px solid var(--text-muted);
+    border-top-color: var(--text-accent);
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+    to {
+        transform: rotate(360deg);
+    }
+}
