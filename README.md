@@ -21,6 +21,11 @@ Obsidian → Note Publisher Plugin → MCP Server → note.com API
 
 ## 📦 インストール
 
+### 前提条件
+
+- [note MCP Server](https://github.com/shimayuz/note-com-mcp) が起動していること
+- note.comアカウントとセッション情報が設定済みであること
+
 ### 1. note MCP Serverのセットアップ
 
 ```bash
@@ -43,14 +48,51 @@ npm run start:http
 
 ### 2. Obsidianプラグインのインストール
 
-1. `plugin/` フォルダ内の以下のファイルをコピー：
+#### 方法A: ZIPファイルから（推奨）
+
+1. このリポジトリのZIPファイルを取得
+2. ZIPファイルを解凍
+3. 解凍したフォルダ内の `plugin/` ディレクトリに移動
+4. 以下の3つのファイルを確認：
    - `main.js`
    - `manifest.json`
    - `styles.css`
+5. Obsidianのプラグインフォルダに配置：
+   ```
+   [Vaultフォルダ]/.obsidian/plugins/obsidian-to-note-publisher/
+   ```
+   
+   **配置例:**
+   ```
+   MyVault/
+   └── .obsidian/
+       └── plugins/
+           └── obsidian-to-note-publisher/
+               ├── main.js
+               ├── manifest.json
+               └── styles.css
+   ```
 
-2. Obsidianの `.obsidian/plugins/obsidian-to-note-publisher/` に配置
+6. Obsidianを再起動
+7. **設定 → コミュニティプラグイン** から「Note Publisher」を有効化
 
-3. Obsidianを再起動し、設定からプラグインを有効化
+#### 方法B: Gitから直接クローン
+
+```bash
+# Obsidianのプラグインフォルダに移動
+cd [Vaultフォルダ]/.obsidian/plugins/
+
+# リポジトリをクローン
+git clone https://github.com/shimayuz/obsidian-to-note-publisher.git
+
+# プラグインフォルダに移動
+cd obsidian-to-note-publisher/plugin/
+
+# 必要なファイルを親ディレクトリにコピー
+cp main.js manifest.json styles.css ../
+
+# Obsidianを再起動して有効化
+```
 
 ### 3. プラグイン設定
 
@@ -210,16 +252,33 @@ npm install
 node esbuild.config.mjs production
 ```
 
-### ファイル構成
+### リポジトリ構成
 
 ```
-plugin/
-├── main.ts       # プラグイン本体
-├── main.js       # ビルド済み
-├── manifest.json # プラグインメタデータ
-├── styles.css    # スタイル
-└── esbuild.config.mjs
+obsidian-to-note-publisher/
+├── README.md              # このファイル
+├── package.json           # プロジェクト設定
+├── .env.example           # 環境変数サンプル
+├── bin/
+│   └── obsidian-to-note   # CLIツール
+├── src/
+│   └── publisher.js       # パブリッシャー本体
+├── scripts/
+│   └── setup.js           # セットアップスクリプト
+└── plugin/                # Obsidianプラグイン
+    ├── main.ts            # プラグインソースコード
+    ├── main.js            # ビルド済みプラグイン
+    ├── manifest.json      # プラグインメタデータ
+    ├── styles.css         # スタイル
+    ├── package.json       # プラグイン依存関係
+    ├── tsconfig.json      # TypeScript設定
+    └── esbuild.config.mjs # ビルド設定
 ```
+
+**インストールに必要なファイル（`plugin/`内）:**
+- `main.js` - プラグイン本体
+- `manifest.json` - プラグイン情報
+- `styles.css` - UI スタイル
 
 ## 📄 ライセンス
 
