@@ -51,13 +51,16 @@ npm run start:http
 #### 方法A: ZIPファイルから（推奨）
 
 1. このリポジトリのZIPファイルを取得
-2. ZIPファイルを解凍
-3. 解凍したフォルダ内の `plugin/` ディレクトリに移動
-4. 以下の3つのファイルを確認：
+2. ZIPファイルを任意の場所に解凍（解凍したフォルダはそのまま残しておいてください）
+3. 解凍したフォルダ内の `plugin/` ディレクトリを開く
+4. **以下の3つのファイルのみ**をコピー：
    - `main.js`
    - `manifest.json`
    - `styles.css`
-5. Obsidianのプラグインフォルダに配置：
+   
+   > ⚠️ `node_modules/` や `package.json` などの他のファイルはコピー不要です
+   
+5. Obsidianのプラグインフォルダに新規フォルダを作成し、コピーした3ファイルを配置：
    ```
    [Vaultフォルダ]/.obsidian/plugins/obsidian-to-note-publisher/
    ```
@@ -68,9 +71,9 @@ npm run start:http
    └── .obsidian/
        └── plugins/
            └── obsidian-to-note-publisher/
-               ├── main.js
-               ├── manifest.json
-               └── styles.css
+               ├── main.js      ← コピー
+               ├── manifest.json ← コピー
+               └── styles.css    ← コピー
    ```
 
 6. Obsidianを再起動
