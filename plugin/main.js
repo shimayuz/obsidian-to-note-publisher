@@ -591,8 +591,8 @@ var NotePublisherPlugin = class extends import_obsidian.Plugin {
           new import_obsidian.Notice(`Draft created: "${result.title}"
 ${result.imageCount || 0} image(s) inserted`);
         }
-        if (this.settings.openEditorAfterPublish && result.noteUrl) {
-          window.open(result.noteUrl, "_blank");
+        if (this.settings.openEditorAfterPublish) {
+          window.open("https://note.com/notes", "_blank");
         }
       } else {
         throw new Error(result.error || "Unknown error");
