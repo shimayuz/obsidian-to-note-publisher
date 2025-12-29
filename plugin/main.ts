@@ -115,16 +115,29 @@ class MCPClient {
 
             const mcpResponse = JSON.parse(response.text);
             if (mcpResponse.error) {
-                throw new Error(mcpResponse.error.message);
+                const errorMsg = mcpResponse.error.message || JSON.stringify(mcpResponse.error);
+                console.error(`[Note Publisher] MCP error:`, mcpResponse.error);
+                throw new Error(errorMsg);
             }
 
             if (mcpResponse.result?.content?.[0]?.text) {
-                return JSON.parse(mcpResponse.result.content[0].text);
+                const textContent = mcpResponse.result.content[0].text;
+                // Check if the text content indicates an error
+                if (textContent.includes('error') || textContent.includes('Error')) {
+                    console.error(`[Note Publisher] Tool returned error:`, textContent);
+                }
+                try {
+                    return JSON.parse(textContent);
+                } catch (parseError) {
+                    // If not JSON, return as-is (might be an error message)
+                    console.error(`[Note Publisher] Response is not JSON:`, textContent);
+                    throw new Error(textContent);
+                }
             }
             return mcpResponse.result;
         } catch (e: any) {
             console.error(`[Note Publisher] Request failed:`, e);
-            throw e;
+            throw new Error(`Tool execution error: ${e.message}`);
         }
     }
 
@@ -815,14 +828,22 @@ export default class NotePublisherPlugin extends Plugin {
         console.error('Note Publisher error:', error);
         let message = 'Failed to publish';
 
-        if (error.message.includes('ECONNREFUSED') || error.message.includes('fetch')) {
+        const errMsg = error.message || String(error);
+
+        if (errMsg.includes('ECONNREFUSED') || errMsg.includes('fetch')) {
             message = `Cannot connect to MCP server at ${this.settings.mcpServerUrl}. Is it running?`;
-        } else if (error.message.includes('timeout')) {
+        } else if (errMsg.includes('timeout')) {
             message = 'Operation timed out. Please try again.';
-        } else if (error.message.includes('認証')) {
+        } else if (errMsg.includes('認証')) {
             message = 'Authentication failed. Check MCP server credentials.';
+        } else if (errMsg.includes('Tool execution error')) {
+            // Extract the actual error from the message
+            const actualError = errMsg.replace('Tool execution error: ', '');
+            message = `Tool error: ${actualError}`;
+        } else if (errMsg.includes('not found') || errMsg.includes('404')) {
+            message = `Tool not found. Make sure MCP server supports 'post-draft-note-with-images'.`;
         } else {
-            message = `Error: ${error.message}`;
+            message = `Error: ${errMsg}`;
         }
 
         new Notice(message, 10000);
