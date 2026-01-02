@@ -51,6 +51,108 @@ interface PublishResult {
 }
 
 // ========================================
+// Frontmatter Utilities
+// ========================================
+
+/**
+ * frontmatterを更新する
+ * @param app Obsidian App
+ * @param file 対象ファイル
+ * @param updates 更新するフィールド
+ */
+async function updateFrontmatter(app: App, file: TFile, updates: Record<string, any>): Promise<void> {
+    const content = await app.vault.read(file);
+    const frontmatterRegex = /^---\s*\n([\s\S]*?)\n---\s*\n?/;
+    const match = content.match(frontmatterRegex);
+
+    let newContent: string;
+
+    if (match) {
+        // 既存のfrontmatterを解析
+        const frontmatterStr = match[1];
+        const frontmatterLines = frontmatterStr.split('\n');
+        const frontmatterObj: Record<string, any> = {};
+
+        // 簡易YAML解析（単純なkey: value形式のみ対応）
+        for (const line of frontmatterLines) {
+            const colonIndex = line.indexOf(':');
+            if (colonIndex > 0) {
+                const key = line.substring(0, colonIndex).trim();
+                let value = line.substring(colonIndex + 1).trim();
+                // クォートを除去
+                if ((value.startsWith('"') && value.endsWith('"')) || 
+                    (value.startsWith("'") && value.endsWith("'"))) {
+                    value = value.slice(1, -1);
+                }
+                frontmatterObj[key] = value;
+            }
+        }
+
+        // 更新を適用
+        for (const [key, value] of Object.entries(updates)) {
+            if (value === null || value === undefined) {
+                delete frontmatterObj[key];
+            } else {
+                frontmatterObj[key] = value;
+            }
+        }
+
+        // frontmatterを再構築
+        const newFrontmatterLines: string[] = [];
+        for (const [key, value] of Object.entries(frontmatterObj)) {
+            if (value === '' || value === null || value === undefined) {
+                // 空文字列の場合はキーのみ出力
+                newFrontmatterLines.push(`${key}: ""`);
+            } else if (typeof value === 'string' && (value.includes(':') || value.includes('#') || value.includes('"'))) {
+                // 特殊文字を含む場合はクォート
+                newFrontmatterLines.push(`${key}: "${value.replace(/"/g, '\\"')}"`);
+            } else {
+                newFrontmatterLines.push(`${key}: ${value}`);
+            }
+        }
+
+        const newFrontmatter = `---\n${newFrontmatterLines.join('\n')}\n---\n`;
+        newContent = content.replace(frontmatterRegex, newFrontmatter);
+    } else {
+        // frontmatterがない場合は新規作成
+        const newFrontmatterLines: string[] = [];
+        for (const [key, value] of Object.entries(updates)) {
+            if (value !== null && value !== undefined) {
+                if (value === '') {
+                    newFrontmatterLines.push(`${key}: ""`);
+                } else if (typeof value === 'string' && (value.includes(':') || value.includes('#') || value.includes('"'))) {
+                    newFrontmatterLines.push(`${key}: "${value.replace(/"/g, '\\"')}"`);
+                } else {
+                    newFrontmatterLines.push(`${key}: ${value}`);
+                }
+            }
+        }
+        const newFrontmatter = `---\n${newFrontmatterLines.join('\n')}\n---\n\n`;
+        newContent = newFrontmatter + content;
+    }
+
+    await app.vault.modify(file, newContent);
+}
+
+/**
+ * 今日の日付をYYYY-MM-DD形式で取得
+ */
+function getTodayDate(): string {
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = String(now.getMonth() + 1).padStart(2, '0');
+    const day = String(now.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+}
+
+/**
+ * frontmatterからpublish_dateを取得
+ */
+function getPublishDateFromCache(cache: any): string | undefined {
+    return cache?.frontmatter?.publish_date;
+}
+
+// ========================================
 // MCP Client
 // ========================================
 
@@ -723,22 +825,34 @@ export default class NotePublisherPlugin extends Plugin {
             const parsedMarkdown = await parseMarkdownFile(this.app, file);
 
             if (skipConfirmation) {
-                await this.doPublish(parsedMarkdown);
+                await this.doPublish(parsedMarkdown, file);
             } else {
                 new PublishConfirmModal(
                     this.app,
                     parsedMarkdown,
-                    () => this.doPublish(parsedMarkdown),
+                    () => this.doPublish(parsedMarkdown, file),
                     () => { }
                 ).open();
             }
         } catch (error: any) {
+            // 起動前のエラーはそのまま表示
             this.handleError(error);
         }
     }
 
-    async doPublish(parsedMarkdown: ParsedMarkdown) {
+    async doPublish(parsedMarkdown: ParsedMarkdown, file: TFile) {
         const loadingNotice = new Notice('Publishing to note.com...', 0);
+
+        // 投稿開始: status を publishing に変更、publish_error をクリア
+        try {
+            await updateFrontmatter(this.app, file, {
+                status: 'publishing',
+                publish_error: ''
+            });
+            console.log('[Note Publisher] Status changed to: publishing');
+        } catch (e) {
+            console.error('[Note Publisher] Failed to update frontmatter to publishing:', e);
+        }
 
         try {
             const allTags = [...parsedMarkdown.tags, ...this.settings.defaultTags];
@@ -796,6 +910,32 @@ export default class NotePublisherPlugin extends Plugin {
             loadingNotice.hide();
 
             if (result.success) {
+                // 投稿成功: status を published に変更、note_url をセット
+                const cache = this.app.metadataCache.getFileCache(file);
+                const existingPublishDate = getPublishDateFromCache(cache);
+                
+                const successUpdates: Record<string, any> = {
+                    status: 'published',
+                    publish_error: ''
+                };
+
+                // note_url をセット（editUrl または noteUrl）
+                if (result.noteUrl) {
+                    successUpdates.note_url = result.noteUrl;
+                }
+
+                // publish_date が空なら今日の日付を入れる
+                if (!existingPublishDate) {
+                    successUpdates.publish_date = getTodayDate();
+                }
+
+                try {
+                    await updateFrontmatter(this.app, file, successUpdates);
+                    console.log('[Note Publisher] Status changed to: published');
+                } catch (e) {
+                    console.error('[Note Publisher] Failed to update frontmatter to published:', e);
+                }
+
                 if (this.settings.showNotification) {
                     new Notice(`Draft created: "${result.title}"\n${result.imageCount || 0} image(s) inserted`);
                 }
@@ -807,8 +947,53 @@ export default class NotePublisherPlugin extends Plugin {
             }
         } catch (error: any) {
             loadingNotice.hide();
+            
+            // 投稿失敗: status を review に戻し、publish_error に理由を記録
+            const errorMessage = this.getShortErrorMessage(error);
+            try {
+                await updateFrontmatter(this.app, file, {
+                    status: 'review',
+                    publish_error: errorMessage
+                });
+                console.log(`[Note Publisher] Status changed to: review (error: ${errorMessage})`);
+            } catch (e) {
+                console.error('[Note Publisher] Failed to update frontmatter on error:', e);
+            }
+            
             this.handleError(error);
         }
+    }
+
+    /**
+     * エラーメッセージを短い形式に変換
+     */
+    getShortErrorMessage(error: any): string {
+        const message = error.message || String(error);
+        
+        if (message.includes('ECONNREFUSED') || message.includes('fetch')) {
+            return 'MCP接続失敗';
+        }
+        if (message.includes('timeout')) {
+            return 'タイムアウト';
+        }
+        if (message.includes('401') || message.includes('認証')) {
+            return 'API 401';
+        }
+        if (message.includes('403')) {
+            return 'API 403';
+        }
+        if (message.includes('500')) {
+            return 'API 500';
+        }
+        if (message.includes('画像') || message.includes('image')) {
+            return '画像アップロード失敗';
+        }
+        
+        // 長すぎる場合は切り詰め
+        if (message.length > 50) {
+            return message.substring(0, 47) + '...';
+        }
+        return message;
     }
 
     handleError(error: any) {

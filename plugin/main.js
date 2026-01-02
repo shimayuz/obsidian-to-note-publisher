@@ -41,6 +41,81 @@ var DEFAULT_SETTINGS = {
   defaultTags: [],
   useApiMode: true
 };
+async function updateFrontmatter(app, file, updates) {
+  const content = await app.vault.read(file);
+  const frontmatterRegex = /^---\s*\n([\s\S]*?)\n---\s*\n?/;
+  const match = content.match(frontmatterRegex);
+  let newContent;
+  if (match) {
+    const frontmatterStr = match[1];
+    const frontmatterLines = frontmatterStr.split("\n");
+    const frontmatterObj = {};
+    for (const line of frontmatterLines) {
+      const colonIndex = line.indexOf(":");
+      if (colonIndex > 0) {
+        const key = line.substring(0, colonIndex).trim();
+        let value = line.substring(colonIndex + 1).trim();
+        if (value.startsWith('"') && value.endsWith('"') || value.startsWith("'") && value.endsWith("'")) {
+          value = value.slice(1, -1);
+        }
+        frontmatterObj[key] = value;
+      }
+    }
+    for (const [key, value] of Object.entries(updates)) {
+      if (value === null || value === void 0) {
+        delete frontmatterObj[key];
+      } else {
+        frontmatterObj[key] = value;
+      }
+    }
+    const newFrontmatterLines = [];
+    for (const [key, value] of Object.entries(frontmatterObj)) {
+      if (value === "" || value === null || value === void 0) {
+        newFrontmatterLines.push(`${key}: ""`);
+      } else if (typeof value === "string" && (value.includes(":") || value.includes("#") || value.includes('"'))) {
+        newFrontmatterLines.push(`${key}: "${value.replace(/"/g, '\\"')}"`);
+      } else {
+        newFrontmatterLines.push(`${key}: ${value}`);
+      }
+    }
+    const newFrontmatter = `---
+${newFrontmatterLines.join("\n")}
+---
+`;
+    newContent = content.replace(frontmatterRegex, newFrontmatter);
+  } else {
+    const newFrontmatterLines = [];
+    for (const [key, value] of Object.entries(updates)) {
+      if (value !== null && value !== void 0) {
+        if (value === "") {
+          newFrontmatterLines.push(`${key}: ""`);
+        } else if (typeof value === "string" && (value.includes(":") || value.includes("#") || value.includes('"'))) {
+          newFrontmatterLines.push(`${key}: "${value.replace(/"/g, '\\"')}"`);
+        } else {
+          newFrontmatterLines.push(`${key}: ${value}`);
+        }
+      }
+    }
+    const newFrontmatter = `---
+${newFrontmatterLines.join("\n")}
+---
+
+`;
+    newContent = newFrontmatter + content;
+  }
+  await app.vault.modify(file, newContent);
+}
+function getTodayDate() {
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = String(now.getMonth() + 1).padStart(2, "0");
+  const day = String(now.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+function getPublishDateFromCache(cache) {
+  var _a;
+  return (_a = cache == null ? void 0 : cache.frontmatter) == null ? void 0 : _a.publish_date;
+}
 var MCPClient = class {
   constructor(serverUrl) {
     this.requestId = 0;
@@ -531,17 +606,26 @@ var NotePublisherPlugin = class extends import_obsidian.Plugin {
     try {
       const parsedMarkdown = await parseMarkdownFile(this.app, file);
       if (skipConfirmation) {
-        await this.doPublish(parsedMarkdown);
+        await this.doPublish(parsedMarkdown, file);
       } else {
-        new PublishConfirmModal(this.app, parsedMarkdown, () => this.doPublish(parsedMarkdown), () => {
+        new PublishConfirmModal(this.app, parsedMarkdown, () => this.doPublish(parsedMarkdown, file), () => {
         }).open();
       }
     } catch (error) {
       this.handleError(error);
     }
   }
-  async doPublish(parsedMarkdown) {
+  async doPublish(parsedMarkdown, file) {
     const loadingNotice = new import_obsidian.Notice("Publishing to note.com...", 0);
+    try {
+      await updateFrontmatter(this.app, file, {
+        status: "publishing",
+        publish_error: ""
+      });
+      console.log("[Note Publisher] Status changed to: publishing");
+    } catch (e) {
+      console.error("[Note Publisher] Failed to update frontmatter to publishing:", e);
+    }
     try {
       const allTags = [...parsedMarkdown.tags, ...this.settings.defaultTags];
       const uniqueTags = [...new Set(allTags)].slice(0, 10);
@@ -587,6 +671,24 @@ var NotePublisherPlugin = class extends import_obsidian.Plugin {
       }
       loadingNotice.hide();
       if (result.success) {
+        const cache = this.app.metadataCache.getFileCache(file);
+        const existingPublishDate = getPublishDateFromCache(cache);
+        const successUpdates = {
+          status: "published",
+          publish_error: ""
+        };
+        if (result.noteUrl) {
+          successUpdates.note_url = result.noteUrl;
+        }
+        if (!existingPublishDate) {
+          successUpdates.publish_date = getTodayDate();
+        }
+        try {
+          await updateFrontmatter(this.app, file, successUpdates);
+          console.log("[Note Publisher] Status changed to: published");
+        } catch (e) {
+          console.error("[Note Publisher] Failed to update frontmatter to published:", e);
+        }
         if (this.settings.showNotification) {
           new import_obsidian.Notice(`Draft created: "${result.title}"
 ${result.imageCount || 0} image(s) inserted`);
@@ -599,8 +701,43 @@ ${result.imageCount || 0} image(s) inserted`);
       }
     } catch (error) {
       loadingNotice.hide();
+      const errorMessage = this.getShortErrorMessage(error);
+      try {
+        await updateFrontmatter(this.app, file, {
+          status: "review",
+          publish_error: errorMessage
+        });
+        console.log(`[Note Publisher] Status changed to: review (error: ${errorMessage})`);
+      } catch (e) {
+        console.error("[Note Publisher] Failed to update frontmatter on error:", e);
+      }
       this.handleError(error);
     }
+  }
+  getShortErrorMessage(error) {
+    const message = error.message || String(error);
+    if (message.includes("ECONNREFUSED") || message.includes("fetch")) {
+      return "MCP\u63A5\u7D9A\u5931\u6557";
+    }
+    if (message.includes("timeout")) {
+      return "\u30BF\u30A4\u30E0\u30A2\u30A6\u30C8";
+    }
+    if (message.includes("401") || message.includes("\u8A8D\u8A3C")) {
+      return "API 401";
+    }
+    if (message.includes("403")) {
+      return "API 403";
+    }
+    if (message.includes("500")) {
+      return "API 500";
+    }
+    if (message.includes("\u753B\u50CF") || message.includes("image")) {
+      return "\u753B\u50CF\u30A2\u30C3\u30D7\u30ED\u30FC\u30C9\u5931\u6557";
+    }
+    if (message.length > 50) {
+      return message.substring(0, 47) + "...";
+    }
+    return message;
   }
   handleError(error) {
     console.error("Note Publisher error:", error);
