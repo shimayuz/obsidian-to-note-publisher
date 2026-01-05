@@ -33,3 +33,6 @@ test-results/
 # Build outputs
 dist/
 build/
+
+# Plugin user settings
+plugin/data.json

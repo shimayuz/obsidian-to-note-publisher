@@ -1,8 +1,0 @@
-{
-  "mcpServerUrl": "http://localhost:3000",
-  "headlessMode": true,
-  "openEditorAfterPublish": true,
-  "showNotification": true,
-  "defaultTags": [],
-  "useApiMode": true
-}
