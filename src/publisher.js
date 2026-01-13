@@ -599,11 +599,14 @@ async function publishWithApi(absolutePath, envPath) {
     body = body.replace(/^## (.+)$/gm, (_, text) => `<h2 name="${generateUUID()}" id="${generateUUID()}">${text}</h2>`);
 
     // 段落
+    // 空行(\n\n)でパラグラフを分割し、パラグラフ内の単一改行は<br>に変換
     body = body.split('\n\n').map(para => {
         para = para.trim();
         if (para === '') return '';
         if (para.startsWith('<')) return para;
-        return `<p name="${generateUUID()}" id="${generateUUID()}">${para}</p>`;
+        // パラグラフ内の単一改行を<br>に変換（同一パラグラフ内の改行を維持）
+        const formattedPara = para.replace(/\n/g, '<br>');
+        return `<p name="${generateUUID()}" id="${generateUUID()}">${formattedPara}</p>`;
     }).join('');
 
     // Step 1: 下書きを作成
