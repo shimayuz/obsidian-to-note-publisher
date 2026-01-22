@@ -170,10 +170,14 @@ function parseMarkdownElements(markdown) {
             continue;
         }
 
-        // 引用
+        // 引用 - 連続する>行をグループ化
         if (line.startsWith('> ')) {
-            elements.push({ type: 'quote', content: line.slice(2).trim() });
-            i++;
+            const quoteLines = [];
+            while (i < lines.length && lines[i].startsWith('> ')) {
+                quoteLines.push(lines[i].slice(2).trim());
+                i++;
+            }
+            elements.push({ type: 'quote', content: quoteLines.join('\n') });
             continue;
         }
 
@@ -379,12 +383,25 @@ async function insertQuote(page, text) {
     const selected = clicked && await selectMenuItem(page, '引用');
 
     if (!selected) {
-        await page.keyboard.type(`> ${text}`);
-        await page.keyboard.press('Enter');
+        // フォールバック: 各行に > を付けて入力
+        const lines = text.split('\n');
+        for (const line of lines) {
+            await page.keyboard.type(`> ${line}`);
+            await page.keyboard.press('Enter');
+        }
         return;
     }
 
-    await page.keyboard.type(text);
+    // 複数行の場合、Shift+Enterで改行（通常のEnterだとブロックが終了する）
+    const lines = text.split('\n');
+    for (let i = 0; i < lines.length; i++) {
+        await page.keyboard.type(lines[i]);
+        if (i < lines.length - 1) {
+            await page.keyboard.down('Shift');
+            await page.keyboard.press('Enter');
+            await page.keyboard.up('Shift');
+        }
+    }
     await page.keyboard.press('Enter');
     await page.keyboard.press('Enter');
 }
@@ -598,10 +615,11 @@ async function publishWithApi(absolutePath, envPath) {
     body = body.replace(/^### (.+)$/gm, (_, text) => `<h3 name="${generateUUID()}" id="${generateUUID()}">${text}</h3>`);
     body = body.replace(/^## (.+)$/gm, (_, text) => `<h2 name="${generateUUID()}" id="${generateUUID()}">${text}</h2>`);
 
-    // 引用（ブロッククォート）
-    body = body.replace(/^> (.+)$/gm, (_, text) => {
+    // 引用（ブロッククォート）- 連続する>行をグループ化
+    body = body.replace(/(^> .+$\n?)+/gm, (match) => {
+        const lines = match.trim().split('\n').map(line => line.replace(/^> /, ''));
         const uuid = generateUUID();
-        return `<blockquote name="${uuid}" id="${uuid}">${text}</blockquote>`;
+        return `<blockquote name="${uuid}" id="${uuid}">${lines.join('<br>')}</blockquote>`;
     });
 
     // 段落
