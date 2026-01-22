@@ -170,11 +170,11 @@ function parseMarkdownElements(markdown) {
             continue;
         }
 
-        // 引用 - 連続する>行をグループ化
-        if (line.startsWith('> ')) {
+        // 引用 - 連続する>行をグループ化（スペースあり/なし両対応）
+        if (line.startsWith('>')) {
             const quoteLines = [];
-            while (i < lines.length && lines[i].startsWith('> ')) {
-                quoteLines.push(lines[i].slice(2).trim());
+            while (i < lines.length && lines[i].startsWith('>')) {
+                quoteLines.push(lines[i].replace(/^>[ ]?/, '').trim());
                 i++;
             }
             elements.push({ type: 'quote', content: quoteLines.join('\n') });
@@ -615,9 +615,9 @@ async function publishWithApi(absolutePath, envPath) {
     body = body.replace(/^### (.+)$/gm, (_, text) => `<h3 name="${generateUUID()}" id="${generateUUID()}">${text}</h3>`);
     body = body.replace(/^## (.+)$/gm, (_, text) => `<h2 name="${generateUUID()}" id="${generateUUID()}">${text}</h2>`);
 
-    // 引用（ブロッククォート）- 連続する>行をグループ化
-    body = body.replace(/(^> .+$\n?)+/gm, (match) => {
-        const lines = match.trim().split('\n').map(line => line.replace(/^> /, ''));
+    // 引用（ブロッククォート）- 連続する>行をグループ化（スペースあり/なし両対応）
+    body = body.replace(/(^>[ ]?.+$\n?)+/gm, (match) => {
+        const lines = match.trim().split('\n').map(line => line.replace(/^>[ ]?/, ''));
         const uuid = generateUUID();
         return `<blockquote name="${uuid}" id="${uuid}">${lines.join('<br>')}</blockquote>`;
     });

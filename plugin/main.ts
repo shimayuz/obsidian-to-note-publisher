@@ -415,9 +415,9 @@ function prepareBody(content: string): string {
     body = body.replace(/^### (.+)$/gm, '<h3>$1</h3>');
     body = body.replace(/^## (.+)$/gm, '<h2>$1</h2>');
     
-    // 引用（ブロッククォート）- 連続する>行をグループ化
-    body = body.replace(/(^> .+$\n?)+/gm, (match) => {
-        const lines = match.trim().split('\n').map(line => line.replace(/^> /, ''));
+    // 引用（ブロッククォート）- 連続する>行をグループ化（スペースあり/なし両対応）
+    body = body.replace(/(^>[ ]?.+$\n?)+/gm, (match) => {
+        const lines = match.trim().split('\n').map(line => line.replace(/^>[ ]?/, ''));
         return `<blockquote>${lines.join('\n')}</blockquote>`;
     });
     
