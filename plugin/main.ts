@@ -409,6 +409,28 @@ function prepareBody(content: string): string {
     let body = content;
     body = body.replace(/^---\s*\n[\s\S]*?\n---\s*\n?/, '');
     body = body.replace(/^#\s+.+\n?/, '');
+    
+    // MarkdownをHTMLに変換
+    // 見出し
+    body = body.replace(/^### (.+)$/gm, '<h3>$1</h3>');
+    body = body.replace(/^## (.+)$/gm, '<h2>$1</h2>');
+    
+    // 引用（ブロッククォート）
+    body = body.replace(/^> (.+)$/gm, '<blockquote>$1</blockquote>');
+    
+    // 区切り線
+    body = body.replace(/^---+$/gm, '<hr>');
+    
+    // 空行で段落を分割
+    body = body.split('\n\n').map(para => {
+        para = para.trim();
+        if (para === '') return '';
+        if (para.startsWith('<')) return para; // 既にHTMLタグの場合はそのまま
+        // パラグラフ内の改行を<br>に変換
+        const formattedPara = para.replace(/\n/g, '<br>');
+        return `<p>${formattedPara}</p>`;
+    }).join('\n');
+    
     return body.trim();
 }
 
