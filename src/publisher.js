@@ -598,6 +598,12 @@ async function publishWithApi(absolutePath, envPath) {
     body = body.replace(/^### (.+)$/gm, (_, text) => `<h3 name="${generateUUID()}" id="${generateUUID()}">${text}</h3>`);
     body = body.replace(/^## (.+)$/gm, (_, text) => `<h2 name="${generateUUID()}" id="${generateUUID()}">${text}</h2>`);
 
+    // 引用（ブロッククォート）
+    body = body.replace(/^> (.+)$/gm, (_, text) => {
+        const uuid = generateUUID();
+        return `<blockquote name="${uuid}" id="${uuid}">${text}</blockquote>`;
+    });
+
     // 段落
     // 空行(\n\n)でパラグラフを分割し、パラグラフ内の単一改行は<br>に変換
     body = body.split('\n\n').map(para => {
