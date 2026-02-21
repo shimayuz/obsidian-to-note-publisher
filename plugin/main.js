@@ -34,7 +34,7 @@ __export(exports, {
 var import_obsidian = __toModule(require("obsidian"));
 var path = __toModule(require("path"));
 var DEFAULT_SETTINGS = {
-  mcpServerUrl: "http://127.0.0.1:3000",
+  mcpServerUrl: "http://localhost:3001",
   headlessMode: true,
   openEditorAfterPublish: true,
   showNotification: true,
@@ -317,34 +317,6 @@ function prepareBody(content) {
   let body = content;
   body = body.replace(/^---\s*\n[\s\S]*?\n---\s*\n?/, "");
   body = body.replace(/^#\s+.+\n?/, "");
-  const codeBlocks = [];
-  body = body.replace(/```(\w*)\n([\s\S]*?)```/g, (_match, _lang, code) => {
-    codeBlocks.push(`<pre><code>${code.trimEnd()}</code></pre>`);
-    return `__CODE_BLOCK_${codeBlocks.length - 1}__`;
-  });
-  body = body.replace(/^### (.+)$/gm, "<h3>$1</h3>");
-  body = body.replace(/^## (.+)$/gm, "<h2>$1</h2>");
-  body = body.replace(/(^>[ ]?.*$\n?)+/gm, (match) => {
-    const lines = match.trim().split("\n").map((line) => line.replace(/^>[ ]?/, "")).filter((line) => line !== "");
-    return `<blockquote>${lines.join("<br>")}</blockquote>`;
-  });
-  body = body.replace(/^---+$/gm, "<hr>");
-  body = body.replace(/`([^`]+)`/g, "<code>$1</code>");
-  body = body.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
-  body = body.split("\n\n").map((para) => {
-    para = para.trim();
-    if (para === "")
-      return "";
-    if (para.startsWith("<"))
-      return para;
-    if (para.match(/^__CODE_BLOCK_\d+__$/))
-      return para;
-    const formattedPara = para.replace(/\n/g, "<br>");
-    return `<p>${formattedPara}</p>`;
-  }).join("\n");
-  codeBlocks.forEach((block, i) => {
-    body = body.replace(`__CODE_BLOCK_${i}__`, block);
-  });
   return body.trim();
 }
 async function extractImages(app, content, file) {
@@ -527,8 +499,8 @@ var NotePublisherSettingTab = class extends import_obsidian.PluginSettingTab {
   display() {
     const { containerEl } = this;
     containerEl.empty();
-    containerEl.createEl("h2", { text: "Note Publisher Settings (v1.3.0)" });
-    new import_obsidian.Setting(containerEl).setName("MCP Server URL").setDesc("noteMCP\u30B5\u30FC\u30D0\u30FC\u306EURL\uFF08\u4F8B: http://127.0.0.1:3000\uFF09\u3002localhost\u3067\u306F\u306A\u304FIP\u30A2\u30C9\u30EC\u30B9\u3092\u6307\u5B9A\u3057\u3066\u304F\u3060\u3055\u3044").addText((text) => text.setPlaceholder(DEFAULT_SETTINGS.mcpServerUrl).setValue(this.plugin.settings.mcpServerUrl).onChange(async (value) => {
+    containerEl.createEl("h2", { text: "Note Publisher Settings (v1.2.0)" });
+    new import_obsidian.Setting(containerEl).setName("MCP Server URL").setDesc("noteMCP\u30B5\u30FC\u30D0\u30FC\u306EURL\uFF08\u4F8B: http://localhost:3001 \u307E\u305F\u306F http://your-vps:3001\uFF09").addText((text) => text.setPlaceholder(DEFAULT_SETTINGS.mcpServerUrl).setValue(this.plugin.settings.mcpServerUrl).onChange(async (value) => {
       this.plugin.settings.mcpServerUrl = value || DEFAULT_SETTINGS.mcpServerUrl;
       await this.plugin.saveSettings();
     }));
@@ -617,7 +589,7 @@ var NotePublisherPlugin = class extends import_obsidian.Plugin {
       }
     });
     this.addSettingTab(new NotePublisherSettingTab(this.app, this));
-    console.log("Note Publisher plugin loaded (v1.3.0)");
+    console.log("Note Publisher plugin loaded (v1.2.0)");
   }
   onunload() {
     console.log("Note Publisher plugin unloaded");
