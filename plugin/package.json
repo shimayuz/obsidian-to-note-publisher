@@ -1,6 +1,6 @@
 {
     "name": "obsidian-to-note-plugin",
-    "version": "1.0.0",
+    "version": "1.4.0",
     "description": "Obsidian plugin for publishing to note.com",
     "scripts": {
         "dev": "node esbuild.config.mjs",
