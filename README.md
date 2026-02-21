@@ -2,10 +2,16 @@
 
 ObsidianのMarkdown記事をワンクリックでnote.comに公開するプラグイン。
 
-## 🎉 v1.2.0 新機能
+## 🎉 v1.3.0 変更点
 
-**MCP HTTP API経由での画像挿入**に対応！
+**noteMCPの構造変更に対応** - デフォルト接続先を `http://127.0.0.1:3000` に変更
 
+- noteMCPのHTTPサーバーが `localhost` ではなく `127.0.0.1` を要求するようになったため対応
+- 設定画面の説明を更新
+
+### v1.2.0 で追加された機能
+
+- MCP HTTP API経由での画像挿入
 - CLIやPlaywright不要 - 純粋なHTTP API通信
 - 画像をnote.comのS3に直接アップロード
 - アイキャッチ（サムネイル）の自動設定
@@ -41,9 +47,6 @@ npm run build
 
 # HTTPサーバーを起動（デフォルト: ポート3000）
 npm run start:http
-
-# ポート3000が使用中の場合は別のポートを指定
-# MCP_HTTP_PORT=3001 npm run start:http
 ```
 
 ### 2. Obsidianプラグインのインストール
@@ -103,7 +106,7 @@ Obsidianの **設定 → Note Publisher** で以下を設定：
 
 | 設定                      | 推奨値                  | 説明                                       |
 | ------------------------- | ----------------------- | ------------------------------------------ |
-| MCP Server URL            | `http://localhost:3000` | MCPサーバーのURL（ポート変更時は適宜修正） |
+| MCP Server URL            | `http://127.0.0.1:3000` | MCPサーバーのURL（localhostではなくIPアドレスを指定） |
 | API Mode                  | ✅ ON                    | v1.2.0推奨（画像をAPI経由で挿入）          |
 | Open Editor After Publish | ✅ ON                    | 公開後にnote.comエディタを開く             |
 | Show Notification         | ✅ ON                    | 完了通知を表示                             |
@@ -205,19 +208,16 @@ eyecatch: images/thumbnail.png
 ### MCPサーバーに接続できない
 
 ```
-Cannot connect to MCP server at http://localhost:3000
+Cannot connect to MCP server at http://127.0.0.1:3000
 ```
 
 **解決策:**
 1. MCPサーバーが起動しているか確認
    ```bash
-   curl http://localhost:3000/health
+   curl http://127.0.0.1:3000/health
    ```
-2. ポート3000が他のアプリで使用中の場合は、ポート3001で起動
-   ```bash
-   MCP_HTTP_PORT=3001 npm run start:http
-   ```
-   その場合、プラグイン設定のMCP Server URLも `http://localhost:3001` に変更
+2. プラグイン設定のMCP Server URLが `http://127.0.0.1:3000` になっているか確認
+   - `localhost` ではなく `127.0.0.1` を使用してください（noteMCPの仕様変更）
 3. ファイアウォールの設定を確認
 
 ### 画像がアップロードされない
