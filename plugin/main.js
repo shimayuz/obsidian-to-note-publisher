@@ -317,22 +317,34 @@ function prepareBody(content) {
   let body = content;
   body = body.replace(/^---\s*\n[\s\S]*?\n---\s*\n?/, "");
   body = body.replace(/^#\s+.+\n?/, "");
+  const codeBlocks = [];
+  body = body.replace(/```(\w*)\n([\s\S]*?)```/g, (_match, _lang, code) => {
+    codeBlocks.push(`<pre><code>${code.trimEnd()}</code></pre>`);
+    return `__CODE_BLOCK_${codeBlocks.length - 1}__`;
+  });
   body = body.replace(/^### (.+)$/gm, "<h3>$1</h3>");
   body = body.replace(/^## (.+)$/gm, "<h2>$1</h2>");
-  body = body.replace(/(^>[ ]?.+$\n?)+/gm, (match) => {
-    const lines = match.trim().split("\n").map((line) => line.replace(/^>[ ]?/, ""));
-    return `<blockquote>${lines.join("\n")}</blockquote>`;
+  body = body.replace(/(^>[ ]?.*$\n?)+/gm, (match) => {
+    const lines = match.trim().split("\n").map((line) => line.replace(/^>[ ]?/, "")).filter((line) => line !== "");
+    return `<blockquote>${lines.join("<br>")}</blockquote>`;
   });
   body = body.replace(/^---+$/gm, "<hr>");
+  body = body.replace(/`([^`]+)`/g, "<code>$1</code>");
+  body = body.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
   body = body.split("\n\n").map((para) => {
     para = para.trim();
     if (para === "")
       return "";
     if (para.startsWith("<"))
       return para;
+    if (para.match(/^__CODE_BLOCK_\d+__$/))
+      return para;
     const formattedPara = para.replace(/\n/g, "<br>");
     return `<p>${formattedPara}</p>`;
   }).join("\n");
+  codeBlocks.forEach((block, i) => {
+    body = body.replace(`__CODE_BLOCK_${i}__`, block);
+  });
   return body.trim();
 }
 async function extractImages(app, content, file) {

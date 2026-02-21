@@ -409,31 +409,53 @@ function prepareBody(content: string): string {
     let body = content;
     body = body.replace(/^---\s*\n[\s\S]*?\n---\s*\n?/, '');
     body = body.replace(/^#\s+.+\n?/, '');
-    
+
     // MarkdownをHTMLに変換
+
+    // コードブロック（```）を先に保護して他の変換の影響を受けないようにする
+    const codeBlocks: string[] = [];
+    body = body.replace(/```(\w*)\n([\s\S]*?)```/g, (_match, _lang, code) => {
+        codeBlocks.push(`<pre><code>${code.trimEnd()}</code></pre>`);
+        return `__CODE_BLOCK_${codeBlocks.length - 1}__`;
+    });
+
     // 見出し
     body = body.replace(/^### (.+)$/gm, '<h3>$1</h3>');
     body = body.replace(/^## (.+)$/gm, '<h2>$1</h2>');
-    
-    // 引用（ブロッククォート）- 連続する>行をグループ化（スペースあり/なし両対応）
-    body = body.replace(/(^>[ ]?.+$\n?)+/gm, (match) => {
-        const lines = match.trim().split('\n').map(line => line.replace(/^>[ ]?/, ''));
-        return `<blockquote>${lines.join('\n')}</blockquote>`;
+
+    // 引用（ブロッククォート）- 連続する>行をグループ化（空行・スペースあり/なし対応）
+    body = body.replace(/(^>[ ]?.*$\n?)+/gm, (match) => {
+        const lines = match.trim().split('\n')
+            .map(line => line.replace(/^>[ ]?/, ''))
+            .filter(line => line !== '');
+        return `<blockquote>${lines.join('<br>')}</blockquote>`;
     });
-    
+
     // 区切り線
     body = body.replace(/^---+$/gm, '<hr>');
-    
+
+    // インラインコード
+    body = body.replace(/`([^`]+)`/g, '<code>$1</code>');
+
+    // 太字
+    body = body.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+
     // 空行で段落を分割
     body = body.split('\n\n').map(para => {
         para = para.trim();
         if (para === '') return '';
-        if (para.startsWith('<')) return para; // 既にHTMLタグの場合はそのまま
+        if (para.startsWith('<')) return para;
+        if (para.match(/^__CODE_BLOCK_\d+__$/)) return para;
         // パラグラフ内の改行を<br>に変換
         const formattedPara = para.replace(/\n/g, '<br>');
         return `<p>${formattedPara}</p>`;
     }).join('\n');
-    
+
+    // コードブロックを復元
+    codeBlocks.forEach((block, i) => {
+        body = body.replace(`__CODE_BLOCK_${i}__`, block);
+    });
+
     return body.trim();
 }
 
