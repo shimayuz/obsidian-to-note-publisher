@@ -329,10 +329,6 @@ function prepareBody(content) {
     codeBlocks.push(`<pre><code>${code.trimEnd()}</code></pre>`);
     return `__CODE_BLOCK_${codeBlocks.length - 1}__`;
   });
-  body = body.replace(/^!\[\[[^\]]+\]\]\n(?!\n)(.+)$/gm, "");
-  body = body.replace(/^!\[\[[^\]]+\]\]$/gm, "");
-  body = body.replace(/^!\[([^\]]*)\]\([^)]+\)\n(?!\n)(.+)$/gm, "");
-  body = body.replace(/^!\[([^\]]*)\]\([^)]+\)$/gm, "");
   body = body.replace(/^### (.+)$/gm, (_, text) => `<h3 name="${generateUUID()}" id="${generateUUID()}">${text}</h3>`);
   body = body.replace(/^## (.+)$/gm, (_, text) => `<h2 name="${generateUUID()}" id="${generateUUID()}">${text}</h2>`);
   body = body.replace(/(^>[ ]?.*$\n?)+/gm, (match) => {
@@ -352,16 +348,15 @@ function prepareBody(content) {
   body = body.replace(/`([^`]+)`/g, "<code>$1</code>");
   body = body.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
   body = body.replace(/(?<!\*)\*([^*]+)\*(?!\*)/g, "<em>$1</em>");
-  body = body.split("\n\n").map((para) => {
-    para = para.trim();
-    if (para === "")
+  body = body.split("\n").map((line) => {
+    line = line.trim();
+    if (line === "")
       return "";
-    if (para.startsWith("<"))
-      return para;
-    if (para.match(/^__CODE_BLOCK_\d+__$/))
-      return para;
-    const text = para.replace(/\n/g, "");
-    return `<p name="${generateUUID()}" id="${generateUUID()}">${text}</p>`;
+    if (line.startsWith("<"))
+      return line;
+    if (line.match(/^__CODE_BLOCK_\d+__$/))
+      return line;
+    return `<p name="${generateUUID()}" id="${generateUUID()}">${line}</p>`;
   }).join("");
   codeBlocks.forEach((block, i) => {
     body = body.replace(`__CODE_BLOCK_${i}__`, block);
