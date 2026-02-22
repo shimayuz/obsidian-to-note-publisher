@@ -34,7 +34,7 @@ __export(exports, {
 var import_obsidian = __toModule(require("obsidian"));
 var path = __toModule(require("path"));
 var DEFAULT_SETTINGS = {
-  mcpServerUrl: "http://localhost:3001",
+  mcpServerUrl: "http://127.0.0.1:3000",
   headlessMode: true,
   openEditorAfterPublish: true,
   showNotification: true,
@@ -499,8 +499,8 @@ var NotePublisherSettingTab = class extends import_obsidian.PluginSettingTab {
   display() {
     const { containerEl } = this;
     containerEl.empty();
-    containerEl.createEl("h2", { text: "Note Publisher Settings (v1.2.0)" });
-    new import_obsidian.Setting(containerEl).setName("MCP Server URL").setDesc("noteMCP\u30B5\u30FC\u30D0\u30FC\u306EURL\uFF08\u4F8B: http://localhost:3001 \u307E\u305F\u306F http://your-vps:3001\uFF09").addText((text) => text.setPlaceholder(DEFAULT_SETTINGS.mcpServerUrl).setValue(this.plugin.settings.mcpServerUrl).onChange(async (value) => {
+    containerEl.createEl("h2", { text: "Note Publisher Settings (v1.2.2)" });
+    new import_obsidian.Setting(containerEl).setName("MCP Server URL").setDesc("noteMCP\u30B5\u30FC\u30D0\u30FC\u306EURL\uFF08\u4F8B: http://127.0.0.1:3000\uFF09\u3002localhost\u3067\u306F\u306A\u304FIP\u30A2\u30C9\u30EC\u30B9\u3092\u6307\u5B9A\u3057\u3066\u304F\u3060\u3055\u3044").addText((text) => text.setPlaceholder(DEFAULT_SETTINGS.mcpServerUrl).setValue(this.plugin.settings.mcpServerUrl).onChange(async (value) => {
       this.plugin.settings.mcpServerUrl = value || DEFAULT_SETTINGS.mcpServerUrl;
       await this.plugin.saveSettings();
     }));
@@ -589,7 +589,7 @@ var NotePublisherPlugin = class extends import_obsidian.Plugin {
       }
     });
     this.addSettingTab(new NotePublisherSettingTab(this.app, this));
-    console.log("Note Publisher plugin loaded (v1.2.0)");
+    console.log("Note Publisher plugin loaded (v1.2.2)");
   }
   onunload() {
     console.log("Note Publisher plugin unloaded");

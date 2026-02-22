@@ -15,7 +15,7 @@ interface NotePublisherSettings {
 }
 
 const DEFAULT_SETTINGS: NotePublisherSettings = {
-    mcpServerUrl: 'http://localhost:3001',
+    mcpServerUrl: 'http://127.0.0.1:3000',
     headlessMode: true,
     openEditorAfterPublish: true,
     showNotification: true,
@@ -655,11 +655,11 @@ class NotePublisherSettingTab extends PluginSettingTab {
         const { containerEl } = this;
         containerEl.empty();
 
-        containerEl.createEl('h2', { text: 'Note Publisher Settings (v1.2.0)' });
+        containerEl.createEl('h2', { text: 'Note Publisher Settings (v1.2.2)' });
 
         new Setting(containerEl)
             .setName('MCP Server URL')
-            .setDesc('noteMCPサーバーのURL（例: http://localhost:3001 または http://your-vps:3001）')
+            .setDesc('noteMCPサーバーのURL（例: http://127.0.0.1:3000）。localhostではなくIPアドレスを指定してください')
             .addText(text => text
                 .setPlaceholder(DEFAULT_SETTINGS.mcpServerUrl)
                 .setValue(this.plugin.settings.mcpServerUrl)
@@ -804,7 +804,7 @@ export default class NotePublisherPlugin extends Plugin {
         });
 
         this.addSettingTab(new NotePublisherSettingTab(this.app, this));
-        console.log('Note Publisher plugin loaded (v1.2.0)');
+        console.log('Note Publisher plugin loaded (v1.2.2)');
     }
 
     onunload() {
