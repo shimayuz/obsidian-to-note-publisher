@@ -470,14 +470,13 @@ function prepareBody(content: string): string {
     // 斜体
     body = body.replace(/(?<!\*)\*([^*]+)\*(?!\*)/g, '<em>$1</em>');
 
-    // 段落分割（UUID付き）
-    body = body.split('\n\n').map(para => {
-        para = para.trim();
-        if (para === '') return '';
-        if (para.startsWith('<')) return para;
-        if (para.match(/^__CODE_BLOCK_\d+__$/)) return para;
-        const formattedPara = para.replace(/\n/g, '<br>');
-        return `<p name="${generateUUID()}" id="${generateUUID()}">${formattedPara}</p>`;
+    // 段落分割（UUID付き）- 各行を個別の<p>タグにする
+    body = body.split('\n').map(line => {
+        line = line.trim();
+        if (line === '') return '';
+        if (line.startsWith('<')) return line;
+        if (line.match(/^__CODE_BLOCK_\d+__$/)) return line;
+        return `<p name="${generateUUID()}" id="${generateUUID()}">${line}</p>`;
     }).join('');
 
     // コードブロックを復元
