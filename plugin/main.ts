@@ -425,6 +425,15 @@ function prepareBody(content: string): string {
         return `__CODE_BLOCK_${codeBlocks.length - 1}__`;
     });
 
+    // 画像参照を除去（画像はMCPサーバーが別途処理）
+    // ![[image.png]] + 直後のキャプション行（空行なし）を除去
+    body = body.replace(/^!\[\[[^\]]+\]\]\n(?!\n)(.+)$/gm, '');
+    // 残りの画像参照（キャプションなし）を除去
+    body = body.replace(/^!\[\[[^\]]+\]\]$/gm, '');
+    // Markdown形式の画像も除去: ![alt](url)
+    body = body.replace(/^!\[([^\]]*)\]\([^)]+\)\n(?!\n)(.+)$/gm, '');
+    body = body.replace(/^!\[([^\]]*)\]\([^)]+\)$/gm, '');
+
     // 見出し（UUID付き）
     body = body.replace(/^### (.+)$/gm, (_, text) =>
         `<h3 name="${generateUUID()}" id="${generateUUID()}">${text}</h3>`);
@@ -470,13 +479,14 @@ function prepareBody(content: string): string {
     // 斜体
     body = body.replace(/(?<!\*)\*([^*]+)\*(?!\*)/g, '<em>$1</em>');
 
-    // 段落分割（UUID付き）- 各行を個別の<p>タグにする
-    body = body.split('\n').map(line => {
-        line = line.trim();
-        if (line === '') return '';
-        if (line.startsWith('<')) return line;
-        if (line.match(/^__CODE_BLOCK_\d+__$/)) return line;
-        return `<p name="${generateUUID()}" id="${generateUUID()}">${line}</p>`;
+    // 段落分割（UUID付き）- \n\nで段落分割、単一改行は無視
+    body = body.split('\n\n').map(para => {
+        para = para.trim();
+        if (para === '') return '';
+        if (para.startsWith('<')) return para;
+        if (para.match(/^__CODE_BLOCK_\d+__$/)) return para;
+        const text = para.replace(/\n/g, '');
+        return `<p name="${generateUUID()}" id="${generateUUID()}">${text}</p>`;
     }).join('');
 
     // コードブロックを復元
