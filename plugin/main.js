@@ -336,6 +336,14 @@ function prepareBody(content) {
     const uuid = generateUUID();
     return `<blockquote name="${uuid}" id="${uuid}">${lines.join("<br>")}</blockquote>`;
   });
+  body = body.replace(/(^\d+\.\s+.+$\n?)+/gm, (match) => {
+    const items = match.trim().split("\n").map((line) => line.replace(/^\d+\.\s+/, "")).map((item) => `<li>${item}</li>`).join("");
+    return `<ol>${items}</ol>`;
+  });
+  body = body.replace(/(^[-*]\s+.+$\n?)+/gm, (match) => {
+    const items = match.trim().split("\n").map((line) => line.replace(/^[-*]\s+/, "")).map((item) => `<li>${item}</li>`).join("");
+    return `<ul>${items}</ul>`;
+  });
   body = body.replace(/^---+$/gm, "<hr>");
   body = body.replace(/`([^`]+)`/g, "<code>$1</code>");
   body = body.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");

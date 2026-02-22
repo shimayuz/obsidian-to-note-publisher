@@ -440,6 +440,24 @@ function prepareBody(content: string): string {
         return `<blockquote name="${uuid}" id="${uuid}">${lines.join('<br>')}</blockquote>`;
     });
 
+    // 番号付きリスト（連続する「数字. 」行をグループ化）
+    body = body.replace(/(^\d+\.\s+.+$\n?)+/gm, (match) => {
+        const items = match.trim().split('\n')
+            .map(line => line.replace(/^\d+\.\s+/, ''))
+            .map(item => `<li>${item}</li>`)
+            .join('');
+        return `<ol>${items}</ol>`;
+    });
+
+    // 箇条書きリスト（連続する「- 」行をグループ化）
+    body = body.replace(/(^[-*]\s+.+$\n?)+/gm, (match) => {
+        const items = match.trim().split('\n')
+            .map(line => line.replace(/^[-*]\s+/, ''))
+            .map(item => `<li>${item}</li>`)
+            .join('');
+        return `<ul>${items}</ul>`;
+    });
+
     // 区切り線
     body = body.replace(/^---+$/gm, '<hr>');
 
