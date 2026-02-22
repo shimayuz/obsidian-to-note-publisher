@@ -409,6 +409,15 @@ function prepareBody(content: string): string {
     let body = content;
     body = body.replace(/^---\s*\n[\s\S]*?\n---\s*\n?/, '');
     body = body.replace(/^#\s+.+\n?/, '');
+
+    // 引用（>行）をHTMLに変換（note.comで改行が無効になる問題の対策）
+    body = body.replace(/(^>[ ]?.*$\n?)+/gm, (match) => {
+        const lines = match.trim().split('\n')
+            .map(line => line.replace(/^>[ ]?/, ''))
+            .filter(line => line !== '');
+        return `<blockquote>${lines.join('<br>')}</blockquote>\n`;
+    });
+
     return body.trim();
 }
 

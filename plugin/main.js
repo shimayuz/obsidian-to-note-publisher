@@ -317,6 +317,10 @@ function prepareBody(content) {
   let body = content;
   body = body.replace(/^---\s*\n[\s\S]*?\n---\s*\n?/, "");
   body = body.replace(/^#\s+.+\n?/, "");
+  body = body.replace(/(^>[ ]?.*$\n?)+/gm, (match) => {
+    const lines = match.trim().split("\n").map((line) => line.replace(/^>[ ]?/, "")).filter((line) => line !== "");
+    return `<blockquote>${lines.join("<br>")}</blockquote>\n`;
+  });
   return body.trim();
 }
 async function extractImages(app, content, file) {
