@@ -313,13 +313,46 @@ async function extractEyecatch(app, cache, fileDir) {
     return void 0;
   }
 }
+function generateUUID() {
+  return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {
+    const r = Math.random() * 16 | 0;
+    const v = c === "x" ? r : r & 3 | 8;
+    return v.toString(16);
+  });
+}
 function prepareBody(content) {
   let body = content;
   body = body.replace(/^---\s*\n[\s\S]*?\n---\s*\n?/, "");
   body = body.replace(/^#\s+.+\n?/, "");
+  const codeBlocks = [];
+  body = body.replace(/```(\w*)\n([\s\S]*?)```/g, (_match, _lang, code) => {
+    codeBlocks.push(`<pre><code>${code.trimEnd()}</code></pre>`);
+    return `__CODE_BLOCK_${codeBlocks.length - 1}__`;
+  });
+  body = body.replace(/^### (.+)$/gm, (_, text) => `<h3 name="${generateUUID()}" id="${generateUUID()}">${text}</h3>`);
+  body = body.replace(/^## (.+)$/gm, (_, text) => `<h2 name="${generateUUID()}" id="${generateUUID()}">${text}</h2>`);
   body = body.replace(/(^>[ ]?.*$\n?)+/gm, (match) => {
     const lines = match.trim().split("\n").map((line) => line.replace(/^>[ ]?/, "")).filter((line) => line !== "");
-    return `<blockquote>${lines.join("<br>")}</blockquote>\n`;
+    const uuid = generateUUID();
+    return `<blockquote name="${uuid}" id="${uuid}">${lines.join("<br>")}</blockquote>`;
+  });
+  body = body.replace(/^---+$/gm, "<hr>");
+  body = body.replace(/`([^`]+)`/g, "<code>$1</code>");
+  body = body.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
+  body = body.replace(/(?<!\*)\*([^*]+)\*(?!\*)/g, "<em>$1</em>");
+  body = body.split("\n\n").map((para) => {
+    para = para.trim();
+    if (para === "")
+      return "";
+    if (para.startsWith("<"))
+      return para;
+    if (para.match(/^__CODE_BLOCK_\d+__$/))
+      return para;
+    const formattedPara = para.replace(/\n/g, "<br>");
+    return `<p name="${generateUUID()}" id="${generateUUID()}">${formattedPara}</p>`;
+  }).join("");
+  codeBlocks.forEach((block, i) => {
+    body = body.replace(`__CODE_BLOCK_${i}__`, block);
   });
   return body.trim();
 }

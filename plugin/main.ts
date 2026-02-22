@@ -405,17 +405,66 @@ async function extractEyecatch(app: App, cache: any, fileDir: string): Promise<I
     }
 }
 
+function generateUUID(): string {
+    return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+        const r = Math.random() * 16 | 0;
+        const v = c === 'x' ? r : (r & 0x3 | 0x8);
+        return v.toString(16);
+    });
+}
+
 function prepareBody(content: string): string {
     let body = content;
     body = body.replace(/^---\s*\n[\s\S]*?\n---\s*\n?/, '');
     body = body.replace(/^#\s+.+\n?/, '');
 
-    // 引用（>行）をHTMLに変換（note.comで改行が無効になる問題の対策）
+    // コードブロックを先にプレースホルダーに退避（他の変換の影響を防ぐ）
+    const codeBlocks: string[] = [];
+    body = body.replace(/```(\w*)\n([\s\S]*?)```/g, (_match, _lang, code) => {
+        codeBlocks.push(`<pre><code>${code.trimEnd()}</code></pre>`);
+        return `__CODE_BLOCK_${codeBlocks.length - 1}__`;
+    });
+
+    // 見出し（UUID付き）
+    body = body.replace(/^### (.+)$/gm, (_, text) =>
+        `<h3 name="${generateUUID()}" id="${generateUUID()}">${text}</h3>`);
+    body = body.replace(/^## (.+)$/gm, (_, text) =>
+        `<h2 name="${generateUUID()}" id="${generateUUID()}">${text}</h2>`);
+
+    // 引用（UUID付き、空行・スペースあり/なし対応）
     body = body.replace(/(^>[ ]?.*$\n?)+/gm, (match) => {
         const lines = match.trim().split('\n')
             .map(line => line.replace(/^>[ ]?/, ''))
             .filter(line => line !== '');
-        return `<blockquote>${lines.join('<br>')}</blockquote>\n`;
+        const uuid = generateUUID();
+        return `<blockquote name="${uuid}" id="${uuid}">${lines.join('<br>')}</blockquote>`;
+    });
+
+    // 区切り線
+    body = body.replace(/^---+$/gm, '<hr>');
+
+    // インラインコード
+    body = body.replace(/`([^`]+)`/g, '<code>$1</code>');
+
+    // 太字
+    body = body.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+
+    // 斜体
+    body = body.replace(/(?<!\*)\*([^*]+)\*(?!\*)/g, '<em>$1</em>');
+
+    // 段落分割（UUID付き）
+    body = body.split('\n\n').map(para => {
+        para = para.trim();
+        if (para === '') return '';
+        if (para.startsWith('<')) return para;
+        if (para.match(/^__CODE_BLOCK_\d+__$/)) return para;
+        const formattedPara = para.replace(/\n/g, '<br>');
+        return `<p name="${generateUUID()}" id="${generateUUID()}">${formattedPara}</p>`;
+    }).join('');
+
+    // コードブロックを復元
+    codeBlocks.forEach((block, i) => {
+        body = body.replace(`__CODE_BLOCK_${i}__`, block);
     });
 
     return body.trim();
