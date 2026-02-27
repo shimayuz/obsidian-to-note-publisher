@@ -128,18 +128,25 @@ function parseMarkdownElements(markdown) {
 
     const elements = [];
     const lines = content.split('\n');
+    let paragraphBuffer = [];
 
     let i = 0;
     while (i < lines.length) {
         const line = lines[i];
 
+        // 空行は段落区切り（バッファをフラッシュ）
         if (line.trim() === '') {
+            if (paragraphBuffer.length > 0) {
+                elements.push({ type: 'paragraph', content: paragraphBuffer.join(' ') });
+                paragraphBuffer = [];
+            }
             i++;
             continue;
         }
 
         // コードブロック
         if (line.startsWith('```')) {
+            if (paragraphBuffer.length > 0) { elements.push({ type: 'paragraph', content: paragraphBuffer.join(' ') }); paragraphBuffer = []; }
             const codeLines = [];
             i++;
             while (i < lines.length && !lines[i].startsWith('```')) {
@@ -153,11 +160,13 @@ function parseMarkdownElements(markdown) {
 
         // 見出し
         if (line.startsWith('## ')) {
+            if (paragraphBuffer.length > 0) { elements.push({ type: 'paragraph', content: paragraphBuffer.join(' ') }); paragraphBuffer = []; }
             elements.push({ type: 'heading2', content: line.slice(3).trim() });
             i++;
             continue;
         }
         if (line.startsWith('### ')) {
+            if (paragraphBuffer.length > 0) { elements.push({ type: 'paragraph', content: paragraphBuffer.join(' ') }); paragraphBuffer = []; }
             elements.push({ type: 'heading3', content: line.slice(4).trim() });
             i++;
             continue;
@@ -165,6 +174,7 @@ function parseMarkdownElements(markdown) {
 
         // 区切り線
         if (line.match(/^---+$/)) {
+            if (paragraphBuffer.length > 0) { elements.push({ type: 'paragraph', content: paragraphBuffer.join(' ') }); paragraphBuffer = []; }
             elements.push({ type: 'hr', content: '' });
             i++;
             continue;
@@ -172,6 +182,7 @@ function parseMarkdownElements(markdown) {
 
         // 引用 - 連続する>行をグループ化（スペースあり/なし両対応）
         if (line.startsWith('>')) {
+            if (paragraphBuffer.length > 0) { elements.push({ type: 'paragraph', content: paragraphBuffer.join(' ') }); paragraphBuffer = []; }
             const quoteLines = [];
             while (i < lines.length && lines[i].startsWith('>')) {
                 quoteLines.push(lines[i].replace(/^>[ ]?/, '').trim());
@@ -183,6 +194,7 @@ function parseMarkdownElements(markdown) {
 
         // 箇条書き
         if (line.match(/^[-*] /)) {
+            if (paragraphBuffer.length > 0) { elements.push({ type: 'paragraph', content: paragraphBuffer.join(' ') }); paragraphBuffer = []; }
             const items = [];
             while (i < lines.length && lines[i].match(/^[-*] /)) {
                 items.push(lines[i].replace(/^[-*] /, '').trim());
@@ -194,6 +206,7 @@ function parseMarkdownElements(markdown) {
 
         // 番号付きリスト
         if (line.match(/^\d+\. /)) {
+            if (paragraphBuffer.length > 0) { elements.push({ type: 'paragraph', content: paragraphBuffer.join(' ') }); paragraphBuffer = []; }
             const items = [];
             while (i < lines.length && lines[i].match(/^\d+\. /)) {
                 items.push(lines[i].replace(/^\d+\. /, '').trim());
@@ -208,19 +221,26 @@ function parseMarkdownElements(markdown) {
         const mdImg = line.match(/^!\[([^\]]*)\]\(([^)]+)\)$/);
 
         if (obsidianImg) {
+            if (paragraphBuffer.length > 0) { elements.push({ type: 'paragraph', content: paragraphBuffer.join(' ') }); paragraphBuffer = []; }
             elements.push({ type: 'image', fileName: obsidianImg[1].trim() });
             i++;
             continue;
         }
         if (mdImg && !mdImg[2].startsWith('http')) {
+            if (paragraphBuffer.length > 0) { elements.push({ type: 'paragraph', content: paragraphBuffer.join(' ') }); paragraphBuffer = []; }
             elements.push({ type: 'image', fileName: path.basename(mdImg[2]) });
             i++;
             continue;
         }
 
-        // 通常のテキスト
-        elements.push({ type: 'paragraph', content: line.trim() });
+        // 通常のテキスト（バッファに追加、空行で区切られるまで同一段落）
+        paragraphBuffer.push(line.trim());
         i++;
+    }
+
+    // 最後のバッファをフラッシュ
+    if (paragraphBuffer.length > 0) {
+        elements.push({ type: 'paragraph', content: paragraphBuffer.join(' ') });
     }
 
     return elements;
@@ -623,14 +643,32 @@ async function publishWithApi(absolutePath, envPath) {
     });
 
     // 段落
-    // 空行(\n\n)でパラグラフを分割し、パラグラフ内の単一改行は<br>に変換
+    // 空行(\n\n)でパラグラフを分割し、パラグラフ内の単一改行はスペースで結合
     body = body.split('\n\n').map(para => {
         para = para.trim();
         if (para === '') return '';
         if (para.startsWith('<')) return para;
-        // パラグラフ内の単一改行を<br>に変換（同一パラグラフ内の改行を維持）
-        const formattedPara = para.replace(/\n/g, '<br>');
-        return `<p name="${generateUUID()}" id="${generateUUID()}">${formattedPara}</p>`;
+        // 段落内の複数行を処理（HTML行は独立、テキスト行はスペースで結合）
+        const lines = para.split('\n');
+        const chunks = [];
+        let textBuffer = [];
+        for (const line of lines) {
+            const trimmed = line.trim();
+            if (!trimmed) continue;
+            if (trimmed.startsWith('<')) {
+                if (textBuffer.length > 0) {
+                    chunks.push(`<p name="${generateUUID()}" id="${generateUUID()}">${textBuffer.join(' ')}</p>`);
+                    textBuffer = [];
+                }
+                chunks.push(trimmed);
+            } else {
+                textBuffer.push(trimmed);
+            }
+        }
+        if (textBuffer.length > 0) {
+            chunks.push(`<p name="${generateUUID()}" id="${generateUUID()}">${textBuffer.join(' ')}</p>`);
+        }
+        return chunks.join('');
     }).join('');
 
     // Step 1: 下書きを作成

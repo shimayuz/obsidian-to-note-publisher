@@ -348,15 +348,35 @@ function prepareBody(content) {
   body = body.replace(/`([^`]+)`/g, "<code>$1</code>");
   body = body.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
   body = body.replace(/(?<!\*)\*([^*]+)\*(?!\*)/g, "<em>$1</em>");
-  body = body.split("\n").map((line) => {
-    line = line.trim();
-    if (line === "")
+  body = body.split("\n\n").map((para) => {
+    para = para.trim();
+    if (para === "")
       return "";
-    if (line.startsWith("<"))
-      return line;
-    if (line.match(/^__CODE_BLOCK_\d+__$/))
-      return line;
-    return `<p name="${generateUUID()}" id="${generateUUID()}">${line}</p>`;
+    if (para.startsWith("<"))
+      return para;
+    if (para.match(/^__CODE_BLOCK_\d+__$/))
+      return para;
+    const lines = para.split("\n");
+    const chunks = [];
+    let textBuffer = [];
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed)
+        continue;
+      if (trimmed.startsWith("<") || trimmed.match(/^__CODE_BLOCK_\d+__$/)) {
+        if (textBuffer.length > 0) {
+          chunks.push(`<p name="${generateUUID()}" id="${generateUUID()}">${textBuffer.join(" ")}</p>`);
+          textBuffer = [];
+        }
+        chunks.push(trimmed);
+      } else {
+        textBuffer.push(trimmed);
+      }
+    }
+    if (textBuffer.length > 0) {
+      chunks.push(`<p name="${generateUUID()}" id="${generateUUID()}">${textBuffer.join(" ")}</p>`);
+    }
+    return chunks.join("");
   }).join("");
   codeBlocks.forEach((block, i) => {
     body = body.replace(`__CODE_BLOCK_${i}__`, block);

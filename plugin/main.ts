@@ -470,13 +470,33 @@ function prepareBody(content: string): string {
     // 斜体
     body = body.replace(/(?<!\*)\*([^*]+)\*(?!\*)/g, '<em>$1</em>');
 
-    // 段落分割（UUID付き）- 各行を個別の<p>タグにする
-    body = body.split('\n').map(line => {
-        line = line.trim();
-        if (line === '') return '';
-        if (line.startsWith('<')) return line;
-        if (line.match(/^__CODE_BLOCK_\d+__$/)) return line;
-        return `<p name="${generateUUID()}" id="${generateUUID()}">${line}</p>`;
+    // 段落分割（UUID付き）- 空行(\n\n)でパラグラフを区切り、段落内の改行はスペースで結合
+    body = body.split('\n\n').map(para => {
+        para = para.trim();
+        if (para === '') return '';
+        if (para.startsWith('<')) return para;
+        if (para.match(/^__CODE_BLOCK_\d+__$/)) return para;
+        // 段落内の複数行を処理（HTML行は独立、テキスト行はスペースで結合）
+        const lines = para.split('\n');
+        const chunks: string[] = [];
+        let textBuffer: string[] = [];
+        for (const line of lines) {
+            const trimmed = line.trim();
+            if (!trimmed) continue;
+            if (trimmed.startsWith('<') || trimmed.match(/^__CODE_BLOCK_\d+__$/)) {
+                if (textBuffer.length > 0) {
+                    chunks.push(`<p name="${generateUUID()}" id="${generateUUID()}">${textBuffer.join(' ')}</p>`);
+                    textBuffer = [];
+                }
+                chunks.push(trimmed);
+            } else {
+                textBuffer.push(trimmed);
+            }
+        }
+        if (textBuffer.length > 0) {
+            chunks.push(`<p name="${generateUUID()}" id="${generateUUID()}">${textBuffer.join(' ')}</p>`);
+        }
+        return chunks.join('');
     }).join('');
 
     // コードブロックを復元
