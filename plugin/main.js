@@ -348,11 +348,13 @@ function prepareBody(content) {
   body = body.replace(/`([^`]+)`/g, "<code>$1</code>");
   body = body.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
   body = body.replace(/(?<!\*)\*([^*]+)\*(?!\*)/g, "<em>$1</em>");
+  body = body.replace(/((?:<\/(?:ol|ul|blockquote|h[1-6])>)|(?:<hr>))\n(?!\n)/g, "$1\n\n");
+  const isBlockElement = (s) => /^<(h[1-6]|blockquote|ol|ul|hr|pre|div|table|figure)[\s>\/]/.test(s);
   body = body.split("\n\n").map((para) => {
     para = para.trim();
     if (para === "")
       return "";
-    if (para.startsWith("<"))
+    if (isBlockElement(para))
       return para;
     if (para.match(/^__CODE_BLOCK_\d+__$/))
       return para;
@@ -364,7 +366,7 @@ function prepareBody(content) {
       if (!trimmed)
         continue;
       const isImage = /^!\[\[.*\]\]$/.test(trimmed) || /^!\[.*\]\(.*\)$/.test(trimmed);
-      if (trimmed.startsWith("<") || trimmed.match(/^__CODE_BLOCK_\d+__$/) || isImage) {
+      if (isBlockElement(trimmed) || trimmed.match(/^__CODE_BLOCK_\d+__$/) || isImage) {
         if (textBuffer.length > 0) {
           chunks.push(`<p name="${generateUUID()}" id="${generateUUID()}">${textBuffer.join("<br>")}</p>`);
           textBuffer = [];

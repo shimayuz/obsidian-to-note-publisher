@@ -470,13 +470,17 @@ function prepareBody(content: string): string {
     // 斜体
     body = body.replace(/(?<!\*)\*([^*]+)\*(?!\*)/g, '<em>$1</em>');
 
-    // 段落分割（UUID付き）- 空行(\n\n)でパラグラフを区切り、段落内の改行はスペースで結合
+    // ブロック要素の後の改行境界を正規化（正規表現が末尾\nを消費するため）
+    body = body.replace(/((?:<\/(?:ol|ul|blockquote|h[1-6])>)|(?:<hr>))\n(?!\n)/g, '$1\n\n');
+
+    // 段落分割（UUID付き）- 空行(\n\n)でパラグラフを区切り、段落内の改行は<br>で結合
+    const isBlockElement = (s: string) => /^<(h[1-6]|blockquote|ol|ul|hr|pre|div|table|figure)[\s>\/]/.test(s);
     body = body.split('\n\n').map(para => {
         para = para.trim();
         if (para === '') return '';
-        if (para.startsWith('<')) return para;
+        if (isBlockElement(para)) return para;
         if (para.match(/^__CODE_BLOCK_\d+__$/)) return para;
-        // 段落内の複数行を処理（HTML行は独立、テキスト行はスペースで結合）
+        // 段落内の複数行を処理（ブロック要素・画像は独立、テキスト行は<br>で結合）
         const lines = para.split('\n');
         const chunks: string[] = [];
         let textBuffer: string[] = [];
@@ -484,7 +488,7 @@ function prepareBody(content: string): string {
             const trimmed = line.trim();
             if (!trimmed) continue;
             const isImage = /^!\[\[.*\]\]$/.test(trimmed) || /^!\[.*\]\(.*\)$/.test(trimmed);
-            if (trimmed.startsWith('<') || trimmed.match(/^__CODE_BLOCK_\d+__$/) || isImage) {
+            if (isBlockElement(trimmed) || trimmed.match(/^__CODE_BLOCK_\d+__$/) || isImage) {
                 if (textBuffer.length > 0) {
                     chunks.push(`<p name="${generateUUID()}" id="${generateUUID()}">${textBuffer.join('<br>')}</p>`);
                     textBuffer = [];
