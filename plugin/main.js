@@ -329,8 +329,6 @@ function prepareBody(content) {
     codeBlocks.push(`<pre><code>${code.trimEnd()}</code></pre>`);
     return `__CODE_BLOCK_${codeBlocks.length - 1}__`;
   });
-  body = body.replace(/!\[\[[^\]]+\]\]/g, "");
-  body = body.replace(/!\[[^\]]*\]\([^)]+\)/g, "");
   body = body.replace(/^### (.+)$/gm, (_, text) => `<h3 name="${generateUUID()}" id="${generateUUID()}">${text}</h3>`);
   body = body.replace(/^## (.+)$/gm, (_, text) => `<h2 name="${generateUUID()}" id="${generateUUID()}">${text}</h2>`);
   body = body.replace(/(^>[ ]?.*$\n?)+/gm, (match) => {
@@ -365,7 +363,8 @@ function prepareBody(content) {
       const trimmed = line.trim();
       if (!trimmed)
         continue;
-      if (trimmed.startsWith("<") || trimmed.match(/^__CODE_BLOCK_\d+__$/)) {
+      const isImage = /^!\[\[.*\]\]$/.test(trimmed) || /^!\[.*\]\(.*\)$/.test(trimmed);
+      if (trimmed.startsWith("<") || trimmed.match(/^__CODE_BLOCK_\d+__$/) || isImage) {
         if (textBuffer.length > 0) {
           chunks.push(`<p name="${generateUUID()}" id="${generateUUID()}">${textBuffer.join("<br>")}</p>`);
           textBuffer = [];

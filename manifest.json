@@ -1,7 +1,7 @@
 {
     "id": "obsidian-to-note-publisher",
     "name": "Note Publisher",
-    "version": "1.2.11",
+    "version": "1.2.12",
     "minAppVersion": "1.0.0",
     "description": "Publish Obsidian notes to note.com with images via MCP server",
     "author": "shimayuz",

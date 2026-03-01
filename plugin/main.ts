@@ -425,10 +425,6 @@ function prepareBody(content: string): string {
         return `__CODE_BLOCK_${codeBlocks.length - 1}__`;
     });
 
-    // 画像参照を除去（画像はextractImagesで別途MCPに送信される）
-    body = body.replace(/!\[\[[^\]]+\]\]/g, '');
-    body = body.replace(/!\[[^\]]*\]\([^)]+\)/g, '');
-
     // 見出し（UUID付き）
     body = body.replace(/^### (.+)$/gm, (_, text) =>
         `<h3 name="${generateUUID()}" id="${generateUUID()}">${text}</h3>`);
@@ -487,7 +483,8 @@ function prepareBody(content: string): string {
         for (const line of lines) {
             const trimmed = line.trim();
             if (!trimmed) continue;
-            if (trimmed.startsWith('<') || trimmed.match(/^__CODE_BLOCK_\d+__$/)) {
+            const isImage = /^!\[\[.*\]\]$/.test(trimmed) || /^!\[.*\]\(.*\)$/.test(trimmed);
+            if (trimmed.startsWith('<') || trimmed.match(/^__CODE_BLOCK_\d+__$/) || isImage) {
                 if (textBuffer.length > 0) {
                     chunks.push(`<p name="${generateUUID()}" id="${generateUUID()}">${textBuffer.join('<br>')}</p>`);
                     textBuffer = [];
