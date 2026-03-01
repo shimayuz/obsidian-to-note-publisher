@@ -365,7 +365,7 @@ function prepareBody(content) {
         continue;
       if (trimmed.startsWith("<") || trimmed.match(/^__CODE_BLOCK_\d+__$/)) {
         if (textBuffer.length > 0) {
-          chunks.push(`<p name="${generateUUID()}" id="${generateUUID()}">${textBuffer.join(" ")}</p>`);
+          chunks.push(`<p name="${generateUUID()}" id="${generateUUID()}">${textBuffer.join("<br>")}</p>`);
           textBuffer = [];
         }
         chunks.push(trimmed);
@@ -374,7 +374,7 @@ function prepareBody(content) {
       }
     }
     if (textBuffer.length > 0) {
-      chunks.push(`<p name="${generateUUID()}" id="${generateUUID()}">${textBuffer.join(" ")}</p>`);
+      chunks.push(`<p name="${generateUUID()}" id="${generateUUID()}">${textBuffer.join("<br>")}</p>`);
     }
     return chunks.join("");
   }).join("");
