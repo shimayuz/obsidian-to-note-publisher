@@ -425,6 +425,10 @@ function prepareBody(content: string): string {
         return `__CODE_BLOCK_${codeBlocks.length - 1}__`;
     });
 
+    // 画像参照を除去（画像はextractImagesで別途MCPに送信される）
+    body = body.replace(/!\[\[[^\]]+\]\]/g, '');
+    body = body.replace(/!\[[^\]]*\]\([^)]+\)/g, '');
+
     // 見出し（UUID付き）
     body = body.replace(/^### (.+)$/gm, (_, text) =>
         `<h3 name="${generateUUID()}" id="${generateUUID()}">${text}</h3>`);

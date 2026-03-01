@@ -329,6 +329,8 @@ function prepareBody(content) {
     codeBlocks.push(`<pre><code>${code.trimEnd()}</code></pre>`);
     return `__CODE_BLOCK_${codeBlocks.length - 1}__`;
   });
+  body = body.replace(/!\[\[[^\]]+\]\]/g, "");
+  body = body.replace(/!\[[^\]]*\]\([^)]+\)/g, "");
   body = body.replace(/^### (.+)$/gm, (_, text) => `<h3 name="${generateUUID()}" id="${generateUUID()}">${text}</h3>`);
   body = body.replace(/^## (.+)$/gm, (_, text) => `<h2 name="${generateUUID()}" id="${generateUUID()}">${text}</h2>`);
   body = body.replace(/(^>[ ]?.*$\n?)+/gm, (match) => {
