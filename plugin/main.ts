@@ -405,110 +405,18 @@ async function extractEyecatch(app: App, cache: any, fileDir: string): Promise<I
     }
 }
 
-function generateUUID(): string {
-    return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
-        const r = Math.random() * 16 | 0;
-        const v = c === 'x' ? r : (r & 0x3 | 0x8);
-        return v.toString(16);
-    });
-}
-
 function prepareBody(content: string): string {
+    // Markdown→HTML変換はnoteMCPサーバー側のconvertMarkdownToNoteHtmlに一本化する。
+    // 以前はここでもHTMLに変換していたが、サーバーが受け取ったbodyを
+    // 「Markdown」として再度convertMarkdownToNoteHtmlに通すため、
+    // 生成済みの<p>タグがさらに<p>で包まれる不正な入れ子HTMLになっていた。
+    // note.comエディタ（ブラウザのHTMLパーサー）はこの入れ子を解釈する際、
+    // HTML5の仕様に従って外側の<p>を直後の内側<p>の開始タグで自動的に閉じるため、
+    // 空の<p></p>がタイトル直後に残り「空行が1行入る」症状として現れていた。
     let body = content;
     body = body.replace(/^---\s*\n[\s\S]*?\n---\s*\n?/, '');
-    body = body.replace(/^#\s+.+\n?/, '');
-
-    // コードブロックを先にプレースホルダーに退避（他の変換の影響を防ぐ）
-    const codeBlocks: string[] = [];
-    body = body.replace(/```(\w*)\n([\s\S]*?)```/g, (_match, _lang, code) => {
-        codeBlocks.push(`<pre><code>${code.trimEnd()}</code></pre>`);
-        return `__CODE_BLOCK_${codeBlocks.length - 1}__`;
-    });
-
-    // 見出し（UUID付き）
-    body = body.replace(/^### (.+)$/gm, (_, text) =>
-        `<h3 name="${generateUUID()}" id="${generateUUID()}">${text}</h3>`);
-    body = body.replace(/^## (.+)$/gm, (_, text) =>
-        `<h2 name="${generateUUID()}" id="${generateUUID()}">${text}</h2>`);
-
-    // 引用（UUID付き、空行・スペースあり/なし対応）
-    body = body.replace(/(^>[ ]?.*$\n?)+/gm, (match) => {
-        const lines = match.trim().split('\n')
-            .map(line => line.replace(/^>[ ]?/, ''))
-            .filter(line => line !== '');
-        const uuid = generateUUID();
-        return `<blockquote name="${uuid}" id="${uuid}">${lines.join('<br>')}</blockquote>`;
-    });
-
-    // 番号付きリスト（連続する「数字. 」行をグループ化）
-    body = body.replace(/(^\d+\.\s+.+$\n?)+/gm, (match) => {
-        const items = match.trim().split('\n')
-            .map(line => line.replace(/^\d+\.\s+/, ''))
-            .map(item => `<li>${item}</li>`)
-            .join('');
-        return `<ol>${items}</ol>`;
-    });
-
-    // 箇条書きリスト（連続する「- 」行をグループ化）
-    body = body.replace(/(^[-*]\s+.+$\n?)+/gm, (match) => {
-        const items = match.trim().split('\n')
-            .map(line => line.replace(/^[-*]\s+/, ''))
-            .map(item => `<li>${item}</li>`)
-            .join('');
-        return `<ul>${items}</ul>`;
-    });
-
-    // 区切り線
-    body = body.replace(/^---+$/gm, '<hr>');
-
-    // インラインコード
-    body = body.replace(/`([^`]+)`/g, '<code>$1</code>');
-
-    // 太字
-    body = body.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
-
-    // 斜体
-    body = body.replace(/(?<!\*)\*([^*]+)\*(?!\*)/g, '<em>$1</em>');
-
-    // ブロック要素の後の改行境界を正規化（正規表現が末尾\nを消費するため）
-    body = body.replace(/((?:<\/(?:ol|ul|blockquote|h[1-6])>)|(?:<hr>))\n(?!\n)/g, '$1\n\n');
-
-    // 段落分割（UUID付き）- 空行(\n\n)でパラグラフを区切り、段落内の改行は<br>で結合
-    const isBlockElement = (s: string) => /^<(h[1-6]|blockquote|ol|ul|hr|pre|div|table|figure)[\s>\/]/.test(s);
-    body = body.split('\n\n').map(para => {
-        para = para.trim();
-        if (para === '') return '';
-        if (isBlockElement(para)) return para;
-        if (para.match(/^__CODE_BLOCK_\d+__$/)) return para;
-        // 段落内の複数行を処理（ブロック要素・画像は独立、テキスト行は<br>で結合）
-        const lines = para.split('\n');
-        const chunks: string[] = [];
-        let textBuffer: string[] = [];
-        for (const line of lines) {
-            const trimmed = line.trim();
-            if (!trimmed) continue;
-            const isImage = /^!\[\[.*\]\]$/.test(trimmed) || /^!\[.*\]\(.*\)$/.test(trimmed);
-            if (isBlockElement(trimmed) || trimmed.match(/^__CODE_BLOCK_\d+__$/) || isImage) {
-                if (textBuffer.length > 0) {
-                    chunks.push(`<p name="${generateUUID()}" id="${generateUUID()}">${textBuffer.join('<br>')}</p>`);
-                    textBuffer = [];
-                }
-                chunks.push(trimmed);
-            } else {
-                textBuffer.push(trimmed);
-            }
-        }
-        if (textBuffer.length > 0) {
-            chunks.push(`<p name="${generateUUID()}" id="${generateUUID()}">${textBuffer.join('<br>')}</p>`);
-        }
-        return chunks.join('');
-    }).join('');
-
-    // コードブロックを復元
-    codeBlocks.forEach((block, i) => {
-        body = body.replace(`__CODE_BLOCK_${i}__`, block);
-    });
-
+    // 先頭のH1タイトル行を除去（タイトルはfrontmatterまたはこの行からextractTitleで取得済み）
+    body = body.replace(/^#\s+.+\n*/, '');
     return body.trim();
 }
 

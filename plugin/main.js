@@ -313,77 +313,10 @@ async function extractEyecatch(app, cache, fileDir) {
     return void 0;
   }
 }
-function generateUUID() {
-  return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {
-    const r = Math.random() * 16 | 0;
-    const v = c === "x" ? r : r & 3 | 8;
-    return v.toString(16);
-  });
-}
 function prepareBody(content) {
   let body = content;
   body = body.replace(/^---\s*\n[\s\S]*?\n---\s*\n?/, "");
-  body = body.replace(/^#\s+.+\n?/, "");
-  const codeBlocks = [];
-  body = body.replace(/```(\w*)\n([\s\S]*?)```/g, (_match, _lang, code) => {
-    codeBlocks.push(`<pre><code>${code.trimEnd()}</code></pre>`);
-    return `__CODE_BLOCK_${codeBlocks.length - 1}__`;
-  });
-  body = body.replace(/^### (.+)$/gm, (_, text) => `<h3 name="${generateUUID()}" id="${generateUUID()}">${text}</h3>`);
-  body = body.replace(/^## (.+)$/gm, (_, text) => `<h2 name="${generateUUID()}" id="${generateUUID()}">${text}</h2>`);
-  body = body.replace(/(^>[ ]?.*$\n?)+/gm, (match) => {
-    const lines = match.trim().split("\n").map((line) => line.replace(/^>[ ]?/, "")).filter((line) => line !== "");
-    const uuid = generateUUID();
-    return `<blockquote name="${uuid}" id="${uuid}">${lines.join("<br>")}</blockquote>`;
-  });
-  body = body.replace(/(^\d+\.\s+.+$\n?)+/gm, (match) => {
-    const items = match.trim().split("\n").map((line) => line.replace(/^\d+\.\s+/, "")).map((item) => `<li>${item}</li>`).join("");
-    return `<ol>${items}</ol>`;
-  });
-  body = body.replace(/(^[-*]\s+.+$\n?)+/gm, (match) => {
-    const items = match.trim().split("\n").map((line) => line.replace(/^[-*]\s+/, "")).map((item) => `<li>${item}</li>`).join("");
-    return `<ul>${items}</ul>`;
-  });
-  body = body.replace(/^---+$/gm, "<hr>");
-  body = body.replace(/`([^`]+)`/g, "<code>$1</code>");
-  body = body.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
-  body = body.replace(/(?<!\*)\*([^*]+)\*(?!\*)/g, "<em>$1</em>");
-  body = body.replace(/((?:<\/(?:ol|ul|blockquote|h[1-6])>)|(?:<hr>))\n(?!\n)/g, "$1\n\n");
-  const isBlockElement = (s) => /^<(h[1-6]|blockquote|ol|ul|hr|pre|div|table|figure)[\s>\/]/.test(s);
-  body = body.split("\n\n").map((para) => {
-    para = para.trim();
-    if (para === "")
-      return "";
-    if (isBlockElement(para))
-      return para;
-    if (para.match(/^__CODE_BLOCK_\d+__$/))
-      return para;
-    const lines = para.split("\n");
-    const chunks = [];
-    let textBuffer = [];
-    for (const line of lines) {
-      const trimmed = line.trim();
-      if (!trimmed)
-        continue;
-      const isImage = /^!\[\[.*\]\]$/.test(trimmed) || /^!\[.*\]\(.*\)$/.test(trimmed);
-      if (isBlockElement(trimmed) || trimmed.match(/^__CODE_BLOCK_\d+__$/) || isImage) {
-        if (textBuffer.length > 0) {
-          chunks.push(`<p name="${generateUUID()}" id="${generateUUID()}">${textBuffer.join("<br>")}</p>`);
-          textBuffer = [];
-        }
-        chunks.push(trimmed);
-      } else {
-        textBuffer.push(trimmed);
-      }
-    }
-    if (textBuffer.length > 0) {
-      chunks.push(`<p name="${generateUUID()}" id="${generateUUID()}">${textBuffer.join("<br>")}</p>`);
-    }
-    return chunks.join("");
-  }).join("");
-  codeBlocks.forEach((block, i) => {
-    body = body.replace(`__CODE_BLOCK_${i}__`, block);
-  });
+  body = body.replace(/^#\s+.+\n*/, "");
   return body.trim();
 }
 async function extractImages(app, content, file) {
