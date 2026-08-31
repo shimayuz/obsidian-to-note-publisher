@@ -2,7 +2,7 @@
 
 ObsidianのMarkdown記事をワンクリックでnote.comに公開するプラグイン。
 
-## 🎉 v1.3.0 変更点
+## 🎉 v1.2.15 変更点
 
 **Markdownの書式が反映されない問題を修正**
 
@@ -12,7 +12,7 @@ v1.2.14でMarkdown→HTML変換をnoteMCPサーバー側へ一本化しました
 Markdownがそのまま送信され、**太字・コードブロック・箇条書き・見出しなどの
 書式が一切反映されない**症状が発生していました。
 
-v1.3.0ではプラグイン側でHTMLへ変換してから送信する方式に戻し、
+v1.2.15ではプラグイン側でHTMLへ変換してから送信する方式に戻し、
 noteMCPサーバーのバージョンに依存せず書式が反映されるようにしました。
 
 - 設定に **Markdown変換** を追加（既定: `このプラグインで変換`）
@@ -78,54 +78,51 @@ npm run start:http
 
 ### 2. Obsidianプラグインのインストール
 
-#### 方法A: ZIPファイルから（推奨）
+#### 方法A: BRAT（推奨）
 
-1. このリポジトリのZIPファイルを取得
-2. ZIPファイルを任意の場所に解凍（解凍したフォルダはそのまま残しておいてください）
-3. 解凍したフォルダ内の `plugin/` ディレクトリを開く
-4. **以下の3つのファイルのみ**をコピー：
-   - `main.js`
-   - `manifest.json`
-   - `styles.css`
-   
-   > ⚠️ `node_modules/` や `package.json` などの他のファイルはコピー不要です
-   
-5. Obsidianのプラグインフォルダに新規フォルダを作成し、コピーした3ファイルを配置：
+[BRAT (Obsidian42 - BRAT)](https://github.com/TfTHacker/obsidian42-brat) はGitHubリポジトリから
+ベータ版プラグインを直接インストール・自動更新できるコミュニティプラグインです。
+
+1. Obsidianの **設定 → コミュニティプラグイン** から **BRAT** をインストールして有効化
+2. コマンドパレット（Cmd/Ctrl+P）で **「BRAT: Add a beta plugin for testing」** を実行
+3. 次のリポジトリパスを入力：
+   ```
+   shimayuz/obsidian-to-note-publisher
+   ```
+4. **Add Plugin** をクリック（最新リリースが自動でインストールされます）
+5. **設定 → コミュニティプラグイン** から「Note Publisher」を有効化
+
+**更新するとき:**
+コマンドパレットで **「BRAT: Check for updates to all beta plugins」** を実行するか、
+BRATの設定で「Auto-enable plugins after installing」「Auto-update at startup」を有効にしておきます。
+
+> ⚠️ BRATはリポジトリ**ルートの `manifest.json`** からバージョンを読み取り、
+> そのバージョンの**GitHubリリース**に添付された `main.js` / `manifest.json` / `styles.css`
+> をダウンロードします。`plugin/` 配下のファイルは参照されません。
+> リリースの作り方は「開発者向け → リリース手順」を参照してください。
+
+#### 方法B: 手動インストール（BRATを使わない場合）
+
+1. [Releases](https://github.com/shimayuz/obsidian-to-note-publisher/releases) から最新版の
+   `main.js` / `manifest.json` / `styles.css` をダウンロード
+2. Obsidianのプラグインフォルダに新規フォルダを作成し、3ファイルを配置：
    ```
    [Vaultフォルダ]/.obsidian/plugins/obsidian-to-note-publisher/
    ```
-   
+
    **配置例:**
    ```
    MyVault/
    └── .obsidian/
        └── plugins/
            └── obsidian-to-note-publisher/
-               ├── main.js      ← コピー
-               ├── manifest.json ← コピー
-               └── styles.css    ← コピー
+               ├── main.js
+               ├── manifest.json
+               └── styles.css
    ```
 
-6. Obsidianを再起動
-7. **設定 → コミュニティプラグイン** から「Note Publisher」を有効化
-
-#### 方法B: Gitから直接クローン
-
-```bash
-# Obsidianのプラグインフォルダに移動
-cd [Vaultフォルダ]/.obsidian/plugins/
-
-# リポジトリをクローン
-git clone https://github.com/shimayuz/obsidian-to-note-publisher.git
-
-# プラグインフォルダに移動
-cd obsidian-to-note-publisher/plugin/
-
-# 必要なファイルを親ディレクトリにコピー
-cp main.js manifest.json styles.css ../
-
-# Obsidianを再起動して有効化
-```
+3. Obsidianを再起動
+4. **設定 → コミュニティプラグイン** から「Note Publisher」を有効化
 
 ### 3. プラグイン設定
 
@@ -259,7 +256,7 @@ note.comの記事で `**太字**` や ``` ```bash ``` がそのままの文字�
 本文がHTMLに変換されずMarkdownのまま送信されています。
 
 **解決策:**
-1. プラグインをv1.3.0以降に更新する
+1. プラグインをv1.2.15以降に更新する
 2. **設定 → Note Publisher → Markdown変換** を `このプラグインで変換（推奨）` にする
 3. `noteMCPサーバーに任せる` を使いたい場合は、noteMCPサーバー側を更新して再ビルドする
    ```bash
@@ -304,8 +301,31 @@ Authentication failed
 ```bash
 cd plugin
 npm install
-node esbuild.config.mjs production
+npm run build          # tsc -noEmit で型チェック → esbuildでmain.jsを生成
 ```
+
+### リリース手順（BRAT配信）
+
+BRATは**リポジトリルートの `manifest.json` のバージョン**を見て、
+`https://github.com/shimayuz/obsidian-to-note-publisher/releases/download/<version>/main.js`
+を取得します。**GitHubリリースに資産を添付しないとBRAT経由では更新が届きません。**
+
+1. バージョンを3ファイルすべてで揃える
+   - `manifest.json`（ルート・BRATが読む）
+   - `plugin/manifest.json`
+   - `package.json`
+   > 既存のタグと重複しないバージョンにしてください（`git tag -l` で確認）
+2. `cd plugin && npm run build` で `plugin/main.js` を再生成してコミット
+3. タグを打って push
+   ```bash
+   git tag 1.2.15
+   git push origin 1.2.15
+   ```
+4. `.github/workflows/release.yml` が自動でビルドし、
+   `main.js` / `manifest.json` / `styles.css` を添付したリリースを作成します
+
+手動でリリースする場合も、必ずこの3ファイルを**リリースの添付ファイル**として
+アップロードしてください（リポジトリに置くだけではBRATは取得しません）。
 
 ### リポジトリ構成
 

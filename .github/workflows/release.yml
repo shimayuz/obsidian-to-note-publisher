@@ -1,0 +1,60 @@
+name: Release
+
+# BRATはリポジトリルートのmanifest.jsonのバージョンを読み、
+# releases/download/<version>/main.js を取得する。
+# タグをpushしたら、そのバージョンのリリースに
+# main.js / manifest.json / styles.css を自動で添付する。
+on:
+  push:
+    tags:
+      - "*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Verify tag matches manifest version
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          MANIFEST_VERSION=$(node -p "require('./manifest.json').version")
+          PLUGIN_VERSION=$(node -p "require('./plugin/manifest.json').version")
+          echo "tag=$TAG root manifest=$MANIFEST_VERSION plugin manifest=$PLUGIN_VERSION"
+          if [ "$TAG" != "$MANIFEST_VERSION" ]; then
+            echo "::error::タグ($TAG)とルートmanifest.json($MANIFEST_VERSION)のバージョンが一致しません。BRATが資産を取得できなくなります。"
+            exit 1
+          fi
+          if [ "$TAG" != "$PLUGIN_VERSION" ]; then
+            echo "::error::タグ($TAG)とplugin/manifest.json($PLUGIN_VERSION)のバージョンが一致しません。"
+            exit 1
+          fi
+
+      - name: Build plugin
+        working-directory: plugin
+        run: |
+          npm install
+          npm run build
+
+      - name: Collect release assets
+        run: |
+          mkdir -p dist
+          cp plugin/main.js dist/main.js
+          cp plugin/styles.css dist/styles.css
+          cp manifest.json dist/manifest.json
+
+      - name: Create release with assets
+        uses: softprops/action-gh-release@v2
+        with:
+          name: v${{ github.ref_name }}
+          files: |
+            dist/main.js
+            dist/manifest.json
+            dist/styles.css

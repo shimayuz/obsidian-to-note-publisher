@@ -22,7 +22,7 @@ interface NotePublisherSettings {
     showNotification: boolean;
     defaultTags: string[];
     useApiMode: boolean;  // v1.2.0: API経由での画像挿入
-    conversionMode: ConversionMode;  // v1.3.0: Markdown→HTML変換の実行場所
+    conversionMode: ConversionMode;  // v1.2.15: Markdown→HTML変換の実行場所
 }
 
 const DEFAULT_SETTINGS: NotePublisherSettings = {
@@ -32,7 +32,7 @@ const DEFAULT_SETTINGS: NotePublisherSettings = {
     showNotification: true,
     defaultTags: [],
     useApiMode: true,  // v1.2.0: デフォルトでAPI経由
-    conversionMode: 'plugin'  // v1.3.0: 既定はプラグイン側で変換（サーバー非依存）
+    conversionMode: 'plugin'  // v1.2.15: 既定はプラグイン側で変換（サーバー非依存）
 };
 
 interface ImageInfo {
@@ -430,7 +430,7 @@ async function extractEyecatch(app: App, cache: any, fileDir: string): Promise<I
 // Markdown → note.com HTML Converter
 // ========================================
 //
-// v1.3.0: Markdown→HTML変換をプラグイン側で行う（既定）。
+// v1.2.15: Markdown→HTML変換をプラグイン側で行う（既定）。
 //
 // v1.2.14でこの変換をnoteMCPサーバーへ一本化したが、サーバー側の変換は
 // noteMCPのバージョンとbuild/の再ビルド状況に依存する。変換を持たない
@@ -982,7 +982,7 @@ class NotePublisherSettingTab extends PluginSettingTab {
         const { containerEl } = this;
         containerEl.empty();
 
-        containerEl.createEl('h2', { text: 'Note Publisher Settings (v1.3.0)' });
+        containerEl.createEl('h2', { text: 'Note Publisher Settings (v1.2.15)' });
 
         new Setting(containerEl)
             .setName('MCP Server URL')
@@ -996,7 +996,7 @@ class NotePublisherSettingTab extends PluginSettingTab {
                 }));
 
         new Setting(containerEl)
-            .setName('Markdown変換 (v1.3.0)')
+            .setName('Markdown変換 (v1.2.15)')
             .setDesc(
                 'このプラグインで変換 = 太字・見出し・箇条書き・コードブロックをHTMLに変換してから送信します（推奨）。' +
                 'noteMCPサーバーに任せる = Markdownのまま送信します（サーバーがMarkdown変換に対応していない場合、書式が反映されません）。'
