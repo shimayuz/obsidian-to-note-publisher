@@ -5,6 +5,16 @@ import * as path from 'path';
 // Types
 // ========================================
 
+/**
+ * 本文のMarkdown→HTML変換をどこで行うか。
+ * - 'plugin': プラグイン側で変換してHTMLを送信する（既定・推奨）。
+ *             noteMCPサーバーのバージョンに依存せず書式が反映される。
+ * - 'server': Markdownのまま送信し、noteMCPサーバーの変換に任せる。
+ *             サーバーがMarkdown変換に対応していない/古いbuildの場合、
+ *             書式が一切反映されないので注意。
+ */
+type ConversionMode = 'plugin' | 'server';
+
 interface NotePublisherSettings {
     mcpServerUrl: string;
     headlessMode: boolean;
@@ -12,6 +22,7 @@ interface NotePublisherSettings {
     showNotification: boolean;
     defaultTags: string[];
     useApiMode: boolean;  // v1.2.0: API経由での画像挿入
+    conversionMode: ConversionMode;  // v1.2.15: Markdown→HTML変換の実行場所
 }
 
 const DEFAULT_SETTINGS: NotePublisherSettings = {
@@ -20,7 +31,8 @@ const DEFAULT_SETTINGS: NotePublisherSettings = {
     openEditorAfterPublish: true,
     showNotification: true,
     defaultTags: [],
-    useApiMode: true  // v1.2.0: デフォルトでAPI経由
+    useApiMode: true,  // v1.2.0: デフォルトでAPI経由
+    conversionMode: 'plugin'  // v1.2.15: 既定はプラグイン側で変換（サーバー非依存）
 };
 
 interface ImageInfo {
@@ -38,6 +50,9 @@ interface ParsedMarkdown {
     images: ImageInfo[];
     eyecatch?: ImageInfo;
 }
+
+/** noteMCPへ渡す本文の形式。'html' を渡すとサーバー側のMarkdown変換がスキップされる */
+type BodyFormat = 'markdown' | 'html';
 
 interface PublishResult {
     success: boolean;
@@ -239,13 +254,17 @@ class MCPClient {
         tags?: string[];
         images?: { fileName: string; base64: string; mimeType?: string }[];
         eyecatch?: { fileName: string; base64: string; mimeType?: string };
+        bodyFormat?: BodyFormat;
     }): Promise<PublishResult> {
         try {
             console.log(`[Note Publisher] Using post-draft-note-with-images (API mode)`);
 
+            // bodyFormat: 'html' を渡すと対応サーバーはMarkdown再変換をスキップする。
+            // 未対応のサーバーでは未知のキーとして無視されるだけなので安全。
             const toolArgs: any = {
                 title: params.title,
                 body: params.markdown,
+                bodyFormat: params.bodyFormat || 'markdown',
                 tags: params.tags || []
             };
 
@@ -297,6 +316,7 @@ class MCPClient {
         headless?: boolean;
         saveAsDraft?: boolean;
         eyecatch?: { fileName: string; base64: string; mimeType?: string };
+        bodyFormat?: BodyFormat;
     }): Promise<PublishResult> {
         const hasEyecatch = params.eyecatch && params.eyecatch.base64;
         try {
@@ -305,6 +325,7 @@ class MCPClient {
             const toolArgs: any = {
                 title: params.title,
                 body: params.markdown,
+                bodyFormat: params.bodyFormat || 'markdown',
                 tags: params.tags
             };
 
@@ -343,7 +364,7 @@ class MCPClient {
 // Markdown Parser
 // ========================================
 
-async function parseMarkdownFile(app: App, file: TFile): Promise<ParsedMarkdown> {
+async function parseMarkdownFile(app: App, file: TFile, conversionMode: ConversionMode): Promise<ParsedMarkdown> {
     const content = await app.vault.read(file);
     const cache = app.metadataCache.getFileCache(file);
 
@@ -351,7 +372,7 @@ async function parseMarkdownFile(app: App, file: TFile): Promise<ParsedMarkdown>
     const tags = extractTags(cache);
     const fileDir = file.parent?.path || '';
     const eyecatch = await extractEyecatch(app, cache, fileDir);
-    const body = prepareBody(content);
+    const body = prepareBody(content, conversionMode);
     const images = await extractImages(app, content, file);
 
     return {
@@ -405,19 +426,310 @@ async function extractEyecatch(app: App, cache: any, fileDir: string): Promise<I
     }
 }
 
-function prepareBody(content: string): string {
-    // Markdown→HTML変換はnoteMCPサーバー側のconvertMarkdownToNoteHtmlに一本化する。
-    // 以前はここでもHTMLに変換していたが、サーバーが受け取ったbodyを
-    // 「Markdown」として再度convertMarkdownToNoteHtmlに通すため、
-    // 生成済みの<p>タグがさらに<p>で包まれる不正な入れ子HTMLになっていた。
-    // note.comエディタ（ブラウザのHTMLパーサー）はこの入れ子を解釈する際、
-    // HTML5の仕様に従って外側の<p>を直後の内側<p>の開始タグで自動的に閉じるため、
-    // 空の<p></p>がタイトル直後に残り「空行が1行入る」症状として現れていた。
+// ========================================
+// Markdown → note.com HTML Converter
+// ========================================
+//
+// v1.2.15: Markdown→HTML変換をプラグイン側で行う（既定）。
+//
+// v1.2.14でこの変換をnoteMCPサーバーへ一本化したが、サーバー側の変換は
+// noteMCPのバージョンとbuild/の再ビルド状況に依存する。変換を持たない
+// （または古いbuildの）サーバーに当たると、note.comへMarkdownがそのまま
+// 送信され、太字・コードブロック・箇条書きなどの書式が一切反映されない。
+// プラグインが自前で変換すればサーバーのバージョンに依存しなくなる。
+//
+// 二重変換（v1.2.13の「タイトル直後に空行が入る」症状）は次の2点で回避する:
+//   1. ツール引数に bodyFormat: 'html' を渡す（対応サーバーは変換をスキップ）
+//   2. 生成HTMLが必ずブロック要素で始まるようにする
+//      （サーバーのlooksLikeHtml()判定でMarkdown再変換がスキップされる）
+
+function generateUUID(): string {
+    return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+        const r = Math.random() * 16 | 0;
+        const v = c === 'x' ? r : (r & 0x3 | 0x8);
+        return v.toString(16);
+    });
+}
+
+function escapeHtml(text: string): string {
+    return text
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
+}
+
+/**
+ * note.comが各ブロック要素に持たせているname/id属性（UUID）を付与する。
+ * br / hr / img と自己終端タグは対象外。
+ */
+function addUUIDAttributes(html: string): string {
+    return html.replace(/<(\w+)([^>]*)>/g, (match, tag: string, attrs: string) => {
+        if (tag === 'hr' || tag === 'br' || tag === 'img' || attrs.includes('/')) {
+            return match;
+        }
+        const uuid = generateUUID();
+        return `<${tag}${attrs} name="${uuid}" id="${uuid}">`;
+    });
+}
+
+/**
+ * インライン記法を変換する。
+ * 画像参照とコードは呼び出し前にプレースホルダーへ退避済みである前提。
+ */
+function processInline(text: string): string {
+    let result = text;
+
+    // Obsidianハイライト (==text==) → 太字
+    result = result.replace(/==(.+?)==/g, '<strong>$1</strong>');
+    // 太字 (**text**)
+    result = result.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+    // 斜体 (*text*) ※太字の後に処理する
+    result = result.replace(/\*([^*\n]+)\*/g, '<em>$1</em>');
+    // 取り消し線 (~~text~~)
+    result = result.replace(/~~(.+?)~~/g, '<del>$1</del>');
+    // リンク [text](url)
+    result = result.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2">$1</a>');
+    // Obsidian内部リンク [[link|display]] / [[link]]
+    result = result.replace(/\[\[([^\]|]+)\|([^\]]+)\]\]/g, '$2');
+    result = result.replace(/\[\[([^\]]+)\]\]/g, '$1');
+
+    return result;
+}
+
+/** 行が特殊要素（見出し・リスト・引用・水平線・プレースホルダー）かどうか */
+function isSpecialLine(line: string): boolean {
+    const trimmed = line.trim();
+    if (!trimmed) return false;
+    if (/^#{1,6}\s+/.test(trimmed)) return true;
+    if (/^[-*]\s+/.test(trimmed)) return true;
+    if (/^\d+\.\s+/.test(trimmed)) return true;
+    if (/^>/.test(trimmed)) return true;
+    if (/^-{3,}$/.test(trimmed) || /^\*{3,}$/.test(trimmed)) return true;
+    if (/^__(?:CODE_BLOCK|IMAGE)_\d+__$/.test(trimmed)) return true;
+    return false;
+}
+
+/**
+ * Markdownをnote.com用のHTMLへ変換する。
+ *
+ * 変換ルール（READMEの「Markdown→note.com変換ルール」と対応）:
+ *   `#` / `##`   → <h2>（大見出し）
+ *   `###`        → <h3>（小見出し）
+ *   `####`〜     → <p><strong>（太字）
+ *   `- item`     → <ul><li>
+ *   `1. item`    → <ol><li>
+ *   ```code```   → <pre><code>
+ *   `> quote`    → <blockquote>
+ *   `---`        → <hr>
+ *   **bold** → <strong> / *italic* → <em> / ~~del~~ → <del> / ==mark== → <strong>
+ *   `code`       → <code>
+ *   段落内の単一改行 → <br>（Obsidian準拠）、空行 → 段落区切り
+ *
+ * 画像参照（![[img.png]] / ![alt](img.png)）はnoteMCPサーバーが<figure>へ
+ * 置換するため、変換せず素のまま残す。<p>で包むと<p><figure></p>となり
+ * 空の<p>が残って画像の前後に余計な改行が入るため、単独行の画像は包まない。
+ */
+function convertMarkdownToNoteHtml(markdown: string): string {
+    if (!markdown) return '';
+
+    let text = markdown.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+
+    // 1. コードブロックを退避（以降の変換から保護）
+    const codeBlocks: string[] = [];
+    text = text.replace(/```(\w*)\n?([\s\S]*?)```/g, (_match, _lang, code: string) => {
+        const index = codeBlocks.length;
+        codeBlocks.push(`<pre><code>${escapeHtml(code.trim())}</code></pre>`);
+        return `__CODE_BLOCK_${index}__`;
+    });
+
+    // 2. インラインコードを退避
+    const inlineCodes: string[] = [];
+    text = text.replace(/`([^`\n]+)`/g, (_match, code: string) => {
+        const index = inlineCodes.length;
+        inlineCodes.push(`<code>${escapeHtml(code)}</code>`);
+        return `__INLINE_CODE_${index}__`;
+    });
+
+    // 3. 画像参照を退避（サーバーの<figure>置換用に原文のまま復元する）
+    const imageRefs: string[] = [];
+    const stashImage = (match: string) => {
+        const index = imageRefs.length;
+        imageRefs.push(match);
+        return `__IMAGE_${index}__`;
+    };
+    text = text.replace(/!\[\[[^\]]+\]\]/g, stashImage);
+    text = text.replace(/!\[[^\]]*\]\([^)]+\)/g, stashImage);
+
+    // 4. 複数行にまたがる太字（**の開始と終了が別の行にあるObsidianの改行スタイル）を先に変換
+    text = text.replace(/\*\*((?:(?!\n\n)(?!\*\*)[\s\S])+?)\*\*/g, '<strong>$1</strong>');
+
+    const result: string[] = [];
+
+    for (const paragraph of text.split(/\n\n+/)) {
+        const trimmedPara = paragraph.trim();
+        if (!trimmedPara) continue;
+
+        const lines = trimmedPara.split('\n');
+
+        // 特殊要素を含まない段落：段落内の単一改行は<br>で保持（Obsidian準拠）
+        if (!lines.some(isSpecialLine)) {
+            const processed = lines.map(l => processInline(l.trim())).filter(l => l);
+            if (processed.length > 0) {
+                result.push(`<p>${processed.join('<br>')}</p>`);
+            }
+            continue;
+        }
+
+        // 特殊要素を含む段落は行単位で処理する
+        const state: { list: 'ul' | 'ol' | null; items: string[]; quote: string[] } = {
+            list: null,
+            items: [],
+            quote: []
+        };
+
+        const closeList = () => {
+            if (state.list && state.items.length > 0) {
+                const tag = state.list;
+                result.push(`<${tag}>${state.items.map(i => `<li>${i}</li>`).join('')}</${tag}>`);
+            }
+            state.list = null;
+            state.items = [];
+        };
+        const closeQuote = () => {
+            if (state.quote.length > 0) {
+                result.push(`<blockquote>${state.quote.join('<br>')}</blockquote>`);
+                state.quote = [];
+            }
+        };
+        const closeAll = () => { closeList(); closeQuote(); };
+
+        for (const line of lines) {
+            const trimmedLine = line.trim();
+            if (!trimmedLine) continue;
+
+            // コードブロック
+            if (/^__CODE_BLOCK_\d+__$/.test(trimmedLine)) {
+                closeAll();
+                const index = parseInt(trimmedLine.replace(/\D+/g, ''), 10);
+                result.push(codeBlocks[index]);
+                continue;
+            }
+
+            // 単独行の画像参照は<p>で包まず素のまま出力する
+            if (/^__IMAGE_\d+__$/.test(trimmedLine)) {
+                closeAll();
+                result.push(trimmedLine);
+                continue;
+            }
+
+            // 見出し（# / ## → h2、### → h3、#### 以降 → 太字）
+            const headingMatch = trimmedLine.match(/^(#{1,6})\s+(.+)$/);
+            if (headingMatch) {
+                closeAll();
+                const level = headingMatch[1].length;
+                const content = processInline(headingMatch[2]);
+                if (level <= 2) {
+                    result.push(`<h2>${content}</h2>`);
+                } else if (level === 3) {
+                    result.push(`<h3>${content}</h3>`);
+                } else {
+                    result.push(`<p><strong>${content}</strong></p>`);
+                }
+                continue;
+            }
+
+            // 水平線
+            if (/^-{3,}$/.test(trimmedLine) || /^\*{3,}$/.test(trimmedLine)) {
+                closeAll();
+                result.push('<hr>');
+                continue;
+            }
+
+            // 引用（"> text" / ">text" 両対応）
+            const quoteMatch = trimmedLine.match(/^>\s?(.*)$/);
+            if (quoteMatch) {
+                closeList();
+                state.quote.push(processInline(quoteMatch[1]));
+                continue;
+            }
+            closeQuote();
+
+            // 箇条書き
+            const ulMatch = trimmedLine.match(/^[-*]\s+(.+)$/);
+            if (ulMatch) {
+                if (state.list === 'ol') closeList();
+                state.list = 'ul';
+                state.items.push(processInline(ulMatch[1]));
+                continue;
+            }
+
+            // 番号付きリスト
+            const olMatch = trimmedLine.match(/^\d+\.\s+(.+)$/);
+            if (olMatch) {
+                if (state.list === 'ul') closeList();
+                state.list = 'ol';
+                state.items.push(processInline(olMatch[1]));
+                continue;
+            }
+
+            // リスト以外の通常テキスト行
+            closeList();
+            result.push(`<p>${processInline(trimmedLine)}</p>`);
+        }
+
+        closeAll();
+    }
+
+    // 連続するblockquoteをマージ（引用の間に余計な改行が入るのを防ぐ）
+    const merged: string[] = [];
+    for (const item of result) {
+        const prev = merged[merged.length - 1];
+        if (prev && prev.startsWith('<blockquote>') && prev.endsWith('</blockquote>') &&
+            item.startsWith('<blockquote>') && item.endsWith('</blockquote>')) {
+            const prevContent = prev.slice('<blockquote>'.length, -'</blockquote>'.length);
+            const curContent = item.slice('<blockquote>'.length, -'</blockquote>'.length);
+            merged[merged.length - 1] = `<blockquote>${prevContent}<br>${curContent}</blockquote>`;
+        } else {
+            merged.push(item);
+        }
+    }
+
+    let html = merged.join('');
+
+    // コードを復元してからUUIDを付与（<pre>/<code>/<a>にもnote.com同様の属性が付く）
+    inlineCodes.forEach((code, index) => {
+        html = html.split(`__INLINE_CODE_${index}__`).join(code);
+    });
+    codeBlocks.forEach((code, index) => {
+        html = html.split(`__CODE_BLOCK_${index}__`).join(code);
+    });
+
+    html = addUUIDAttributes(html);
+
+    // 画像参照は最後に原文のまま復元する（HTMLタグではないのでUUID付与の対象外）
+    imageRefs.forEach((ref, index) => {
+        html = html.split(`__IMAGE_${index}__`).join(ref);
+    });
+
+    return html.trim();
+}
+
+function prepareBody(content: string, conversionMode: ConversionMode): string {
     let body = content;
+    // frontmatterを除去
     body = body.replace(/^---\s*\n[\s\S]*?\n---\s*\n?/, '');
     // 先頭のH1タイトル行を除去（タイトルはfrontmatterまたはこの行からextractTitleで取得済み）
     body = body.replace(/^#\s+.+\n*/, '');
-    return body.trim();
+    body = body.trim();
+
+    if (conversionMode === 'server') {
+        // サーバー側（noteMCPのconvertMarkdownToNoteHtml）に変換を任せる
+        return body;
+    }
+
+    return convertMarkdownToNoteHtml(body);
 }
 
 async function extractImages(app: App, content: string, file: TFile): Promise<ImageInfo[]> {
@@ -618,10 +930,17 @@ class PublishConfirmModal extends Modal {
             }
         }
 
-        const bodyPreview = this.parsedMarkdown.body.substring(0, 200);
+        // 本文はHTMLに変換済みのことがあるため、プレビューではタグを除去して表示する
+        const plainBody = this.parsedMarkdown.body
+            .replace(/<\/(p|h[1-6]|li|blockquote|pre)>/g, ' ')
+            .replace(/<br\s*\/?>/g, ' ')
+            .replace(/<[^>]+>/g, '')
+            .replace(/\s+/g, ' ')
+            .trim();
+        const bodyPreview = plainBody.substring(0, 200);
         new Setting(contentEl)
             .setName('Body Preview')
-            .setDesc(bodyPreview + (this.parsedMarkdown.body.length > 200 ? '...' : ''));
+            .setDesc(bodyPreview + (plainBody.length > 200 ? '...' : ''));
 
         const buttonContainer = contentEl.createDiv('button-container');
 
@@ -663,7 +982,7 @@ class NotePublisherSettingTab extends PluginSettingTab {
         const { containerEl } = this;
         containerEl.empty();
 
-        containerEl.createEl('h2', { text: 'Note Publisher Settings (v1.2.2)' });
+        containerEl.createEl('h2', { text: 'Note Publisher Settings (v1.2.15)' });
 
         new Setting(containerEl)
             .setName('MCP Server URL')
@@ -673,6 +992,21 @@ class NotePublisherSettingTab extends PluginSettingTab {
                 .setValue(this.plugin.settings.mcpServerUrl)
                 .onChange(async (value) => {
                     this.plugin.settings.mcpServerUrl = value || DEFAULT_SETTINGS.mcpServerUrl;
+                    await this.plugin.saveSettings();
+                }));
+
+        new Setting(containerEl)
+            .setName('Markdown変換 (v1.2.15)')
+            .setDesc(
+                'このプラグインで変換 = 太字・見出し・箇条書き・コードブロックをHTMLに変換してから送信します（推奨）。' +
+                'noteMCPサーバーに任せる = Markdownのまま送信します（サーバーがMarkdown変換に対応していない場合、書式が反映されません）。'
+            )
+            .addDropdown(dropdown => dropdown
+                .addOption('plugin', 'このプラグインで変換（推奨）')
+                .addOption('server', 'noteMCPサーバーに任せる')
+                .setValue(this.plugin.settings.conversionMode)
+                .onChange(async (value) => {
+                    this.plugin.settings.conversionMode = (value === 'server' ? 'server' : 'plugin');
                     await this.plugin.saveSettings();
                 }));
 
@@ -830,7 +1164,7 @@ export default class NotePublisherPlugin extends Plugin {
 
     async publishCurrentFile(file: TFile, skipConfirmation = false) {
         try {
-            const parsedMarkdown = await parseMarkdownFile(this.app, file);
+            const parsedMarkdown = await parseMarkdownFile(this.app, file, this.settings.conversionMode);
 
             if (skipConfirmation) {
                 await this.doPublish(parsedMarkdown, file);
@@ -866,6 +1200,11 @@ export default class NotePublisherPlugin extends Plugin {
             const allTags = [...parsedMarkdown.tags, ...this.settings.defaultTags];
             const uniqueTags = [...new Set(allTags)].slice(0, 10);
 
+            // プラグイン側で変換済みならHTMLとして送り、サーバーの再変換を抑止する
+            const bodyFormat: BodyFormat =
+                this.settings.conversionMode === 'plugin' ? 'html' : 'markdown';
+            console.log(`[Note Publisher] Conversion mode: ${this.settings.conversionMode} (bodyFormat=${bodyFormat})`);
+
             let result: PublishResult;
 
             if (this.settings.useApiMode) {
@@ -892,7 +1231,8 @@ export default class NotePublisherPlugin extends Plugin {
                     markdown: parsedMarkdown.body,
                     tags: uniqueTags,
                     images: imageData,
-                    eyecatch: eyecatchData
+                    eyecatch: eyecatchData,
+                    bodyFormat: bodyFormat
                 });
             } else {
                 // 従来のpost-draft-note（アイキャッチのみ）
@@ -901,7 +1241,8 @@ export default class NotePublisherPlugin extends Plugin {
                     markdown: parsedMarkdown.body,
                     tags: uniqueTags,
                     headless: this.settings.headlessMode,
-                    saveAsDraft: true
+                    saveAsDraft: true,
+                    bodyFormat: bodyFormat
                 };
 
                 if (parsedMarkdown.eyecatch && parsedMarkdown.eyecatch.exists) {

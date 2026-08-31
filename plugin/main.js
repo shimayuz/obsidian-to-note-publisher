@@ -39,7 +39,8 @@ var DEFAULT_SETTINGS = {
   openEditorAfterPublish: true,
   showNotification: true,
   defaultTags: [],
-  useApiMode: true
+  useApiMode: true,
+  conversionMode: "plugin"
 };
 async function updateFrontmatter(app, file, updates) {
   const content = await app.vault.read(file);
@@ -186,6 +187,7 @@ var MCPClient = class {
       const toolArgs = {
         title: params.title,
         body: params.markdown,
+        bodyFormat: params.bodyFormat || "markdown",
         tags: params.tags || []
       };
       if (params.images && params.images.length > 0) {
@@ -227,6 +229,7 @@ var MCPClient = class {
       const toolArgs = {
         title: params.title,
         body: params.markdown,
+        bodyFormat: params.bodyFormat || "markdown",
         tags: params.tags
       };
       if (hasEyecatch) {
@@ -257,7 +260,7 @@ var MCPClient = class {
     }
   }
 };
-async function parseMarkdownFile(app, file) {
+async function parseMarkdownFile(app, file, conversionMode) {
   var _a;
   const content = await app.vault.read(file);
   const cache = app.metadataCache.getFileCache(file);
@@ -265,7 +268,7 @@ async function parseMarkdownFile(app, file) {
   const tags = extractTags(cache);
   const fileDir = ((_a = file.parent) == null ? void 0 : _a.path) || "";
   const eyecatch = await extractEyecatch(app, cache, fileDir);
-  const body = prepareBody(content);
+  const body = prepareBody(content, conversionMode);
   const images = await extractImages(app, content, file);
   return {
     title,
@@ -313,11 +316,210 @@ async function extractEyecatch(app, cache, fileDir) {
     return void 0;
   }
 }
-function prepareBody(content) {
+function generateUUID() {
+  return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {
+    const r = Math.random() * 16 | 0;
+    const v = c === "x" ? r : r & 3 | 8;
+    return v.toString(16);
+  });
+}
+function escapeHtml(text) {
+  return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#039;");
+}
+function addUUIDAttributes(html) {
+  return html.replace(/<(\w+)([^>]*)>/g, (match, tag, attrs) => {
+    if (tag === "hr" || tag === "br" || tag === "img" || attrs.includes("/")) {
+      return match;
+    }
+    const uuid = generateUUID();
+    return `<${tag}${attrs} name="${uuid}" id="${uuid}">`;
+  });
+}
+function processInline(text) {
+  let result = text;
+  result = result.replace(/==(.+?)==/g, "<strong>$1</strong>");
+  result = result.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
+  result = result.replace(/\*([^*\n]+)\*/g, "<em>$1</em>");
+  result = result.replace(/~~(.+?)~~/g, "<del>$1</del>");
+  result = result.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2">$1</a>');
+  result = result.replace(/\[\[([^\]|]+)\|([^\]]+)\]\]/g, "$2");
+  result = result.replace(/\[\[([^\]]+)\]\]/g, "$1");
+  return result;
+}
+function isSpecialLine(line) {
+  const trimmed = line.trim();
+  if (!trimmed)
+    return false;
+  if (/^#{1,6}\s+/.test(trimmed))
+    return true;
+  if (/^[-*]\s+/.test(trimmed))
+    return true;
+  if (/^\d+\.\s+/.test(trimmed))
+    return true;
+  if (/^>/.test(trimmed))
+    return true;
+  if (/^-{3,}$/.test(trimmed) || /^\*{3,}$/.test(trimmed))
+    return true;
+  if (/^__(?:CODE_BLOCK|IMAGE)_\d+__$/.test(trimmed))
+    return true;
+  return false;
+}
+function convertMarkdownToNoteHtml(markdown) {
+  if (!markdown)
+    return "";
+  let text = markdown.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+  const codeBlocks = [];
+  text = text.replace(/```(\w*)\n?([\s\S]*?)```/g, (_match, _lang, code) => {
+    const index = codeBlocks.length;
+    codeBlocks.push(`<pre><code>${escapeHtml(code.trim())}</code></pre>`);
+    return `__CODE_BLOCK_${index}__`;
+  });
+  const inlineCodes = [];
+  text = text.replace(/`([^`\n]+)`/g, (_match, code) => {
+    const index = inlineCodes.length;
+    inlineCodes.push(`<code>${escapeHtml(code)}</code>`);
+    return `__INLINE_CODE_${index}__`;
+  });
+  const imageRefs = [];
+  const stashImage = (match) => {
+    const index = imageRefs.length;
+    imageRefs.push(match);
+    return `__IMAGE_${index}__`;
+  };
+  text = text.replace(/!\[\[[^\]]+\]\]/g, stashImage);
+  text = text.replace(/!\[[^\]]*\]\([^)]+\)/g, stashImage);
+  text = text.replace(/\*\*((?:(?!\n\n)(?!\*\*)[\s\S])+?)\*\*/g, "<strong>$1</strong>");
+  const result = [];
+  for (const paragraph of text.split(/\n\n+/)) {
+    const trimmedPara = paragraph.trim();
+    if (!trimmedPara)
+      continue;
+    const lines = trimmedPara.split("\n");
+    if (!lines.some(isSpecialLine)) {
+      const processed = lines.map((l) => processInline(l.trim())).filter((l) => l);
+      if (processed.length > 0) {
+        result.push(`<p>${processed.join("<br>")}</p>`);
+      }
+      continue;
+    }
+    const state = {
+      list: null,
+      items: [],
+      quote: []
+    };
+    const closeList = () => {
+      if (state.list && state.items.length > 0) {
+        const tag = state.list;
+        result.push(`<${tag}>${state.items.map((i) => `<li>${i}</li>`).join("")}</${tag}>`);
+      }
+      state.list = null;
+      state.items = [];
+    };
+    const closeQuote = () => {
+      if (state.quote.length > 0) {
+        result.push(`<blockquote>${state.quote.join("<br>")}</blockquote>`);
+        state.quote = [];
+      }
+    };
+    const closeAll = () => {
+      closeList();
+      closeQuote();
+    };
+    for (const line of lines) {
+      const trimmedLine = line.trim();
+      if (!trimmedLine)
+        continue;
+      if (/^__CODE_BLOCK_\d+__$/.test(trimmedLine)) {
+        closeAll();
+        const index = parseInt(trimmedLine.replace(/\D+/g, ""), 10);
+        result.push(codeBlocks[index]);
+        continue;
+      }
+      if (/^__IMAGE_\d+__$/.test(trimmedLine)) {
+        closeAll();
+        result.push(trimmedLine);
+        continue;
+      }
+      const headingMatch = trimmedLine.match(/^(#{1,6})\s+(.+)$/);
+      if (headingMatch) {
+        closeAll();
+        const level = headingMatch[1].length;
+        const content = processInline(headingMatch[2]);
+        if (level <= 2) {
+          result.push(`<h2>${content}</h2>`);
+        } else if (level === 3) {
+          result.push(`<h3>${content}</h3>`);
+        } else {
+          result.push(`<p><strong>${content}</strong></p>`);
+        }
+        continue;
+      }
+      if (/^-{3,}$/.test(trimmedLine) || /^\*{3,}$/.test(trimmedLine)) {
+        closeAll();
+        result.push("<hr>");
+        continue;
+      }
+      const quoteMatch = trimmedLine.match(/^>\s?(.*)$/);
+      if (quoteMatch) {
+        closeList();
+        state.quote.push(processInline(quoteMatch[1]));
+        continue;
+      }
+      closeQuote();
+      const ulMatch = trimmedLine.match(/^[-*]\s+(.+)$/);
+      if (ulMatch) {
+        if (state.list === "ol")
+          closeList();
+        state.list = "ul";
+        state.items.push(processInline(ulMatch[1]));
+        continue;
+      }
+      const olMatch = trimmedLine.match(/^\d+\.\s+(.+)$/);
+      if (olMatch) {
+        if (state.list === "ul")
+          closeList();
+        state.list = "ol";
+        state.items.push(processInline(olMatch[1]));
+        continue;
+      }
+      closeList();
+      result.push(`<p>${processInline(trimmedLine)}</p>`);
+    }
+    closeAll();
+  }
+  const merged = [];
+  for (const item of result) {
+    const prev = merged[merged.length - 1];
+    if (prev && prev.startsWith("<blockquote>") && prev.endsWith("</blockquote>") && item.startsWith("<blockquote>") && item.endsWith("</blockquote>")) {
+      const prevContent = prev.slice("<blockquote>".length, -"</blockquote>".length);
+      const curContent = item.slice("<blockquote>".length, -"</blockquote>".length);
+      merged[merged.length - 1] = `<blockquote>${prevContent}<br>${curContent}</blockquote>`;
+    } else {
+      merged.push(item);
+    }
+  }
+  let html = merged.join("");
+  inlineCodes.forEach((code, index) => {
+    html = html.split(`__INLINE_CODE_${index}__`).join(code);
+  });
+  codeBlocks.forEach((code, index) => {
+    html = html.split(`__CODE_BLOCK_${index}__`).join(code);
+  });
+  html = addUUIDAttributes(html);
+  imageRefs.forEach((ref, index) => {
+    html = html.split(`__IMAGE_${index}__`).join(ref);
+  });
+  return html.trim();
+}
+function prepareBody(content, conversionMode) {
   let body = content;
   body = body.replace(/^---\s*\n[\s\S]*?\n---\s*\n?/, "");
   body = body.replace(/^#\s+.+\n*/, "");
-  return body.trim();
+  body = body.trim();
+  if (conversionMode === "server") {
+    return body;
+  }
+  return convertMarkdownToNoteHtml(body);
 }
 async function extractImages(app, content, file) {
   var _a;
@@ -469,8 +671,9 @@ var PublishConfirmModal = class extends import_obsidian.Modal {
         });
       }
     }
-    const bodyPreview = this.parsedMarkdown.body.substring(0, 200);
-    new import_obsidian.Setting(contentEl).setName("Body Preview").setDesc(bodyPreview + (this.parsedMarkdown.body.length > 200 ? "..." : ""));
+    const plainBody = this.parsedMarkdown.body.replace(/<\/(p|h[1-6]|li|blockquote|pre)>/g, " ").replace(/<br\s*\/?>/g, " ").replace(/<[^>]+>/g, "").replace(/\s+/g, " ").trim();
+    const bodyPreview = plainBody.substring(0, 200);
+    new import_obsidian.Setting(contentEl).setName("Body Preview").setDesc(bodyPreview + (plainBody.length > 200 ? "..." : ""));
     const buttonContainer = contentEl.createDiv("button-container");
     const cancelBtn = buttonContainer.createEl("button", { text: "Cancel" });
     cancelBtn.addEventListener("click", () => {
@@ -499,9 +702,13 @@ var NotePublisherSettingTab = class extends import_obsidian.PluginSettingTab {
   display() {
     const { containerEl } = this;
     containerEl.empty();
-    containerEl.createEl("h2", { text: "Note Publisher Settings (v1.2.2)" });
+    containerEl.createEl("h2", { text: "Note Publisher Settings (v1.2.15)" });
     new import_obsidian.Setting(containerEl).setName("MCP Server URL").setDesc("noteMCP\u30B5\u30FC\u30D0\u30FC\u306EURL\uFF08\u4F8B: http://127.0.0.1:3000\uFF09\u3002localhost\u3067\u306F\u306A\u304FIP\u30A2\u30C9\u30EC\u30B9\u3092\u6307\u5B9A\u3057\u3066\u304F\u3060\u3055\u3044").addText((text) => text.setPlaceholder(DEFAULT_SETTINGS.mcpServerUrl).setValue(this.plugin.settings.mcpServerUrl).onChange(async (value) => {
       this.plugin.settings.mcpServerUrl = value || DEFAULT_SETTINGS.mcpServerUrl;
+      await this.plugin.saveSettings();
+    }));
+    new import_obsidian.Setting(containerEl).setName("Markdown\u5909\u63DB (v1.2.15)").setDesc("\u3053\u306E\u30D7\u30E9\u30B0\u30A4\u30F3\u3067\u5909\u63DB = \u592A\u5B57\u30FB\u898B\u51FA\u3057\u30FB\u7B87\u6761\u66F8\u304D\u30FB\u30B3\u30FC\u30C9\u30D6\u30ED\u30C3\u30AF\u3092HTML\u306B\u5909\u63DB\u3057\u3066\u304B\u3089\u9001\u4FE1\u3057\u307E\u3059\uFF08\u63A8\u5968\uFF09\u3002noteMCP\u30B5\u30FC\u30D0\u30FC\u306B\u4EFB\u305B\u308B = Markdown\u306E\u307E\u307E\u9001\u4FE1\u3057\u307E\u3059\uFF08\u30B5\u30FC\u30D0\u30FC\u304CMarkdown\u5909\u63DB\u306B\u5BFE\u5FDC\u3057\u3066\u3044\u306A\u3044\u5834\u5408\u3001\u66F8\u5F0F\u304C\u53CD\u6620\u3055\u308C\u307E\u305B\u3093\uFF09\u3002").addDropdown((dropdown) => dropdown.addOption("plugin", "\u3053\u306E\u30D7\u30E9\u30B0\u30A4\u30F3\u3067\u5909\u63DB\uFF08\u63A8\u5968\uFF09").addOption("server", "noteMCP\u30B5\u30FC\u30D0\u30FC\u306B\u4EFB\u305B\u308B").setValue(this.plugin.settings.conversionMode).onChange(async (value) => {
+      this.plugin.settings.conversionMode = value === "server" ? "server" : "plugin";
       await this.plugin.saveSettings();
     }));
     new import_obsidian.Setting(containerEl).setName("API Mode (v1.2.0)").setDesc("API\u7D4C\u7531\u3067\u753B\u50CF\u3092\u672C\u6587\u306B\u633F\u5165\uFF08\u63A8\u5968: ON - \u5B89\u5B9A\u30FB\u9AD8\u901F\uFF09").addToggle((toggle) => toggle.setValue(this.plugin.settings.useApiMode).onChange(async (value) => {
@@ -604,7 +811,7 @@ var NotePublisherPlugin = class extends import_obsidian.Plugin {
   }
   async publishCurrentFile(file, skipConfirmation = false) {
     try {
-      const parsedMarkdown = await parseMarkdownFile(this.app, file);
+      const parsedMarkdown = await parseMarkdownFile(this.app, file, this.settings.conversionMode);
       if (skipConfirmation) {
         await this.doPublish(parsedMarkdown, file);
       } else {
@@ -629,6 +836,8 @@ var NotePublisherPlugin = class extends import_obsidian.Plugin {
     try {
       const allTags = [...parsedMarkdown.tags, ...this.settings.defaultTags];
       const uniqueTags = [...new Set(allTags)].slice(0, 10);
+      const bodyFormat = this.settings.conversionMode === "plugin" ? "html" : "markdown";
+      console.log(`[Note Publisher] Conversion mode: ${this.settings.conversionMode} (bodyFormat=${bodyFormat})`);
       let result;
       if (this.settings.useApiMode) {
         const validImages = parsedMarkdown.images.filter((i) => i.exists && i.base64);
@@ -650,7 +859,8 @@ var NotePublisherPlugin = class extends import_obsidian.Plugin {
           markdown: parsedMarkdown.body,
           tags: uniqueTags,
           images: imageData,
-          eyecatch: eyecatchData
+          eyecatch: eyecatchData,
+          bodyFormat
         });
       } else {
         const requestBody = {
@@ -658,7 +868,8 @@ var NotePublisherPlugin = class extends import_obsidian.Plugin {
           markdown: parsedMarkdown.body,
           tags: uniqueTags,
           headless: this.settings.headlessMode,
-          saveAsDraft: true
+          saveAsDraft: true,
+          bodyFormat
         };
         if (parsedMarkdown.eyecatch && parsedMarkdown.eyecatch.exists) {
           requestBody.eyecatch = {
