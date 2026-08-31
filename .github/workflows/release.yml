@@ -6,10 +6,13 @@ name: Release
 # 添付しないとBRAT経由で更新が届かないため、ここで自動化する。
 #
 # 起動方法:
-#   - タグをpush        → そのタグ名でリリースを作成（manifest.jsonと一致必須）
-#   - 手動実行(dispatch) → ルートmanifest.jsonのバージョンでタグとリリースを作成
+#   - mainへpush        → manifest.jsonのバージョンのリリースが無ければ作成
+#   - タグをpush         → そのタグ名でリリースを作成（manifest.jsonと一致必須）
+#   - 手動実行(dispatch) → manifest.jsonのバージョンで作成（既存でも上書き）
 on:
   push:
+    branches:
+      - main
     tags:
       - "*"
   workflow_dispatch:
@@ -49,15 +52,35 @@ jobs:
           fi
 
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          echo "リリースバージョン: $VERSION"
+          echo "対象バージョン: $VERSION"
+
+      # mainへのpushは毎回走るため、既にリリース済みのバージョンは作り直さない。
+      # タグpushと手動実行は明示的な操作なので常に実行する。
+      - name: Decide whether to release
+        id: decide
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          if [ "${GITHUB_REF_TYPE}" = "tag" ] || [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then
+            echo "release=true" >> "$GITHUB_OUTPUT"
+          elif gh release view "$VERSION" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "release=false" >> "$GITHUB_OUTPUT"
+            echo "リリース $VERSION は既に存在するためスキップします。"
+          else
+            echo "release=true" >> "$GITHUB_OUTPUT"
+            echo "リリース $VERSION を新規作成します。"
+          fi
 
       - name: Build plugin
+        if: steps.decide.outputs.release == 'true'
         working-directory: plugin
         run: |
           npm install
           npm run build
 
       - name: Collect release assets
+        if: steps.decide.outputs.release == 'true'
         run: |
           mkdir -p dist
           cp plugin/main.js dist/main.js
@@ -66,6 +89,7 @@ jobs:
           ls -l dist
 
       - name: Create release with assets
+        if: steps.decide.outputs.release == 'true'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.version.outputs.version }}
