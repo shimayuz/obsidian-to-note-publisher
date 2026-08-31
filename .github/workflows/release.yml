@@ -2,12 +2,17 @@ name: Release
 
 # BRATはリポジトリルートのmanifest.jsonのバージョンを読み、
 # releases/download/<version>/main.js を取得する。
-# タグをpushしたら、そのバージョンのリリースに
-# main.js / manifest.json / styles.css を自動で添付する。
+# そのバージョンのリリースに main.js / manifest.json / styles.css を
+# 添付しないとBRAT経由で更新が届かないため、ここで自動化する。
+#
+# 起動方法:
+#   - タグをpush        → そのタグ名でリリースを作成（manifest.jsonと一致必須）
+#   - 手動実行(dispatch) → ルートmanifest.jsonのバージョンでタグとリリースを作成
 on:
   push:
     tags:
       - "*"
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -22,20 +27,29 @@ jobs:
         with:
           node-version: "20"
 
-      - name: Verify tag matches manifest version
+      - name: Resolve version
+        id: version
         run: |
-          TAG="${GITHUB_REF_NAME}"
           MANIFEST_VERSION=$(node -p "require('./manifest.json').version")
           PLUGIN_VERSION=$(node -p "require('./plugin/manifest.json').version")
-          echo "tag=$TAG root manifest=$MANIFEST_VERSION plugin manifest=$PLUGIN_VERSION"
-          if [ "$TAG" != "$MANIFEST_VERSION" ]; then
-            echo "::error::タグ($TAG)とルートmanifest.json($MANIFEST_VERSION)のバージョンが一致しません。BRATが資産を取得できなくなります。"
+
+          if [ "$MANIFEST_VERSION" != "$PLUGIN_VERSION" ]; then
+            echo "::error::ルートmanifest.json($MANIFEST_VERSION)とplugin/manifest.json($PLUGIN_VERSION)のバージョンが一致しません。"
             exit 1
           fi
-          if [ "$TAG" != "$PLUGIN_VERSION" ]; then
-            echo "::error::タグ($TAG)とplugin/manifest.json($PLUGIN_VERSION)のバージョンが一致しません。"
-            exit 1
+
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            VERSION="${GITHUB_REF_NAME}"
+            if [ "$VERSION" != "$MANIFEST_VERSION" ]; then
+              echo "::error::タグ($VERSION)とmanifest.json($MANIFEST_VERSION)のバージョンが一致しません。BRATが資産を取得できなくなります。"
+              exit 1
+            fi
+          else
+            VERSION="$MANIFEST_VERSION"
           fi
+
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "リリースバージョン: $VERSION"
 
       - name: Build plugin
         working-directory: plugin
@@ -49,11 +63,13 @@ jobs:
           cp plugin/main.js dist/main.js
           cp plugin/styles.css dist/styles.css
           cp manifest.json dist/manifest.json
+          ls -l dist
 
       - name: Create release with assets
         uses: softprops/action-gh-release@v2
         with:
-          name: v${{ github.ref_name }}
+          tag_name: ${{ steps.version.outputs.version }}
+          name: v${{ steps.version.outputs.version }}
           files: |
             dist/main.js
             dist/manifest.json
