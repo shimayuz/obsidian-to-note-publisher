@@ -4,6 +4,33 @@ ObsidianのMarkdown記事をワンクリックでnote.comに公開するプラ�
 
 ## 🎉 v1.3.0 変更点
 
+**Markdownの書式が反映されない問題を修正**
+
+v1.2.14でMarkdown→HTML変換をnoteMCPサーバー側へ一本化しましたが、
+サーバー側の変換はnoteMCPのバージョンと `build/` の再ビルド状況に依存します。
+変換に対応していない（または古いbuildの）サーバーに当たると、note.comへ
+Markdownがそのまま送信され、**太字・コードブロック・箇条書き・見出しなどの
+書式が一切反映されない**症状が発生していました。
+
+v1.3.0ではプラグイン側でHTMLへ変換してから送信する方式に戻し、
+noteMCPサーバーのバージョンに依存せず書式が反映されるようにしました。
+
+- 設定に **Markdown変換** を追加（既定: `このプラグインで変換`）
+- 送信時に `bodyFormat` を渡し、サーバー側での二重変換を抑止
+  （v1.2.13で発生していた「タイトル直後に空行が入る」症状は再発しません）
+- `**太字**` / `*斜体*` / `~~取り消し線~~` / `==ハイライト==` / `` `コード` `` /
+  コードブロック / 箇条書き / 番号付きリスト / 引用 / 水平線 / リンク に対応
+- 画像参照は素のまま残し、noteMCPサーバーが `<figure>` へ置換（余計な空行が入りません）
+
+### 書式が反映されない場合
+
+Obsidianの **設定 → Note Publisher → Markdown変換** が
+`このプラグインで変換（推奨）` になっているか確認してください。
+`noteMCPサーバーに任せる` を選ぶ場合は、noteMCPサーバーを最新版に更新し、
+**必ず `npm run build` で再ビルド**してから起動してください。
+
+### v1.2.x の変更点
+
 **noteMCPの構造変更に対応** - デフォルト接続先を `http://127.0.0.1:3000` に変更
 
 - noteMCPのHTTPサーバーが `localhost` ではなく `127.0.0.1` を要求するようになったため対応
@@ -107,6 +134,7 @@ Obsidianの **設定 → Note Publisher** で以下を設定：
 | 設定                      | 推奨値                  | 説明                                       |
 | ------------------------- | ----------------------- | ------------------------------------------ |
 | MCP Server URL            | `http://127.0.0.1:3000` | MCPサーバーのURL（localhostではなくIPアドレスを指定） |
+| Markdown変換              | `このプラグインで変換`   | 書式（太字・コードブロック等）をHTMLに変換してから送信 |
 | API Mode                  | ✅ ON                    | v1.2.0推奨（画像をAPI経由で挿入）          |
 | Open Editor After Publish | ✅ ON                    | 公開後にnote.comエディタを開く             |
 | Show Notification         | ✅ ON                    | 完了通知を表示                             |
@@ -163,8 +191,13 @@ eyecatch: path/to/thumbnail.png
 | `1. item`        | 番号付きリスト | `<ol><li>`     |
 | ` ```code``` `   | コードブロック | `<pre><code>`  |
 | `> quote`        | 引用           | `<blockquote>` |
+| `---`            | 区切り線       | `<hr>`         |
 | `**bold**`       | 太字           | `<strong>`     |
 | `*italic*`       | 斜体           | `<em>`         |
+| `~~del~~`        | 取り消し線     | `<del>`        |
+| `==mark==`       | 太字           | `<strong>`     |
+| `` `code` ``     | インラインコード | `<code>`     |
+| `[text](url)`    | リンク         | `<a>`          |
 
 ## 📝 サンプル記事
 
@@ -219,6 +252,25 @@ Cannot connect to MCP server at http://127.0.0.1:3000
 2. プラグイン設定のMCP Server URLが `http://127.0.0.1:3000` になっているか確認
    - `localhost` ではなく `127.0.0.1` を使用してください（noteMCPの仕様変更）
 3. ファイアウォールの設定を確認
+
+### 太字・コードブロック・箇条書きが反映されない
+
+note.comの記事で `**太字**` や ``` ```bash ``` がそのままの文字列で表示される場合、
+本文がHTMLに変換されずMarkdownのまま送信されています。
+
+**解決策:**
+1. プラグインをv1.3.0以降に更新する
+2. **設定 → Note Publisher → Markdown変換** を `このプラグインで変換（推奨）` にする
+3. `noteMCPサーバーに任せる` を使いたい場合は、noteMCPサーバー側を更新して再ビルドする
+   ```bash
+   cd note-com-mcp
+   git pull
+   npm install
+   npm run build      # ← build/ を再生成しないと変更が反映されません
+   npm run start:http
+   ```
+4. Obsidianの開発者コンソール（Cmd/Ctrl+Shift+I）で
+   `[Note Publisher] Conversion mode: plugin (bodyFormat=html)` が出ているか確認する
 
 ### 画像がアップロードされない
 
