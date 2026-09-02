@@ -42,68 +42,126 @@ var DEFAULT_SETTINGS = {
   useApiMode: true,
   conversionMode: "plugin"
 };
+function parseFrontmatterBlock(content) {
+  const opening = content.match(/^---[ \t]*\r?\n/);
+  if (!opening)
+    return null;
+  const innerStart = opening[0].length;
+  const rest = content.slice(innerStart);
+  const closing = rest.match(/^(?:---|\.\.\.)[ \t]*(?:\r?\n|$)/m);
+  if (!closing || closing.index === void 0)
+    return null;
+  const innerText = rest.slice(0, closing.index);
+  const endIndex = innerStart + closing.index + closing[0].length;
+  const lines = innerText === "" ? [] : innerText.replace(/\r?\n$/, "").split(/\r?\n/);
+  return { endIndex, lines };
+}
+function topLevelKeyOf(line) {
+  const match = line.match(/^([A-Za-z0-9_][A-Za-z0-9_\-. ]*?)[ \t]*:(?:[ \t].*)?$/);
+  return match ? match[1] : null;
+}
+function isContinuationLine(line) {
+  if (line.trim() === "")
+    return true;
+  if (/^[ \t]/.test(line))
+    return true;
+  if (/^-(?:[ \t]|$)/.test(line))
+    return true;
+  return false;
+}
+function needsYamlQuoting(value) {
+  if (value === "")
+    return true;
+  if (value !== value.trim())
+    return true;
+  if (/[\r\n\t]/.test(value))
+    return true;
+  if (value.includes(":"))
+    return true;
+  if (/^[-?,[\]{}#&*!|>'"%@`]/.test(value))
+    return true;
+  if (/\s#/.test(value))
+    return true;
+  if (/^(?:true|false|null|yes|no|on|off|~)$/i.test(value))
+    return true;
+  if (/^[+-]?\d[\d_]*(?:\.\d*)?(?:[eE][+-]?\d+)?$/.test(value))
+    return true;
+  if (/^0[bxo]/i.test(value))
+    return true;
+  return false;
+}
+function toYamlScalar(value) {
+  if (typeof value === "number" || typeof value === "boolean") {
+    return String(value);
+  }
+  if (Array.isArray(value)) {
+    return `[${value.map((v) => toYamlScalar(v)).join(", ")}]`;
+  }
+  const text = String(value);
+  if (!needsYamlQuoting(text))
+    return text;
+  const escaped = text.replace(/\\/g, "\\\\").replace(/"/g, '\\"').replace(/\r?\n/g, "\\n").replace(/\t/g, "\\t");
+  return `"${escaped}"`;
+}
+function applyFrontmatterUpdates(lines, updates) {
+  const result = lines.slice();
+  for (const [key, value] of Object.entries(updates)) {
+    let keyIndex = -1;
+    for (let i = 0; i < result.length; i++) {
+      if (topLevelKeyOf(result[i]) === key) {
+        keyIndex = i;
+        break;
+      }
+    }
+    if (keyIndex === -1) {
+      if (value !== null && value !== void 0) {
+        result.push(`${key}: ${toYamlScalar(value)}`);
+      }
+      continue;
+    }
+    let blockEnd = keyIndex + 1;
+    while (blockEnd < result.length && isContinuationLine(result[blockEnd])) {
+      blockEnd++;
+    }
+    while (blockEnd > keyIndex + 1 && result[blockEnd - 1].trim() === "") {
+      blockEnd--;
+    }
+    if (value === null || value === void 0) {
+      result.splice(keyIndex, blockEnd - keyIndex);
+    } else {
+      result.splice(keyIndex, blockEnd - keyIndex, `${key}: ${toYamlScalar(value)}`);
+    }
+  }
+  return result;
+}
 async function updateFrontmatter(app, file, updates) {
   const content = await app.vault.read(file);
-  const frontmatterRegex = /^---\s*\n([\s\S]*?)\n---\s*\n?/;
-  const match = content.match(frontmatterRegex);
+  const block = parseFrontmatterBlock(content);
   let newContent;
-  if (match) {
-    const frontmatterStr = match[1];
-    const frontmatterLines = frontmatterStr.split("\n");
-    const frontmatterObj = {};
-    for (const line of frontmatterLines) {
-      const colonIndex = line.indexOf(":");
-      if (colonIndex > 0) {
-        const key = line.substring(0, colonIndex).trim();
-        let value = line.substring(colonIndex + 1).trim();
-        if (value.startsWith('"') && value.endsWith('"') || value.startsWith("'") && value.endsWith("'")) {
-          value = value.slice(1, -1);
-        }
-        frontmatterObj[key] = value;
-      }
-    }
-    for (const [key, value] of Object.entries(updates)) {
-      if (value === null || value === void 0) {
-        delete frontmatterObj[key];
-      } else {
-        frontmatterObj[key] = value;
-      }
-    }
-    const newFrontmatterLines = [];
-    for (const [key, value] of Object.entries(frontmatterObj)) {
-      if (value === "" || value === null || value === void 0) {
-        newFrontmatterLines.push(`${key}: ""`);
-      } else if (typeof value === "string" && (value.includes(":") || value.includes("#") || value.includes('"'))) {
-        newFrontmatterLines.push(`${key}: "${value.replace(/"/g, '\\"')}"`);
-      } else {
-        newFrontmatterLines.push(`${key}: ${value}`);
-      }
-    }
+  if (block) {
+    const newLines = applyFrontmatterUpdates(block.lines, updates);
     const newFrontmatter = `---
-${newFrontmatterLines.join("\n")}
+${newLines.join("\n")}
 ---
 `;
-    newContent = content.replace(frontmatterRegex, newFrontmatter);
+    newContent = newFrontmatter + content.slice(block.endIndex);
   } else {
-    const newFrontmatterLines = [];
+    const newLines = [];
     for (const [key, value] of Object.entries(updates)) {
       if (value !== null && value !== void 0) {
-        if (value === "") {
-          newFrontmatterLines.push(`${key}: ""`);
-        } else if (typeof value === "string" && (value.includes(":") || value.includes("#") || value.includes('"'))) {
-          newFrontmatterLines.push(`${key}: "${value.replace(/"/g, '\\"')}"`);
-        } else {
-          newFrontmatterLines.push(`${key}: ${value}`);
-        }
+        newLines.push(`${key}: ${toYamlScalar(value)}`);
       }
     }
-    const newFrontmatter = `---
-${newFrontmatterLines.join("\n")}
+    if (newLines.length === 0)
+      return;
+    newContent = `---
+${newLines.join("\n")}
 ---
 
-`;
-    newContent = newFrontmatter + content;
+` + content;
   }
+  if (newContent === content)
+    return;
   await app.vault.modify(file, newContent);
 }
 function getTodayDate() {
@@ -283,7 +341,9 @@ function extractTitle(content, file, cache) {
   if (frontmatter == null ? void 0 : frontmatter.title) {
     return String(frontmatter.title);
   }
-  const h1Match = content.match(/^#\s+(.+)$/m);
+  const block = parseFrontmatterBlock(content);
+  const body = block ? content.slice(block.endIndex) : content;
+  const h1Match = body.match(/^#\s+(.+)$/m);
   if (h1Match) {
     return h1Match[1].trim();
   }
@@ -512,8 +572,8 @@ function convertMarkdownToNoteHtml(markdown) {
   return html.trim();
 }
 function prepareBody(content, conversionMode) {
-  let body = content;
-  body = body.replace(/^---\s*\n[\s\S]*?\n---\s*\n?/, "");
+  const block = parseFrontmatterBlock(content);
+  let body = block ? content.slice(block.endIndex) : content;
   body = body.replace(/^#\s+.+\n*/, "");
   body = body.trim();
   if (conversionMode === "server") {
@@ -702,7 +762,7 @@ var NotePublisherSettingTab = class extends import_obsidian.PluginSettingTab {
   display() {
     const { containerEl } = this;
     containerEl.empty();
-    containerEl.createEl("h2", { text: "Note Publisher Settings (v1.2.15)" });
+    containerEl.createEl("h2", { text: "Note Publisher Settings (v1.2.16)" });
     new import_obsidian.Setting(containerEl).setName("MCP Server URL").setDesc("noteMCP\u30B5\u30FC\u30D0\u30FC\u306EURL\uFF08\u4F8B: http://127.0.0.1:3000\uFF09\u3002localhost\u3067\u306F\u306A\u304FIP\u30A2\u30C9\u30EC\u30B9\u3092\u6307\u5B9A\u3057\u3066\u304F\u3060\u3055\u3044").addText((text) => text.setPlaceholder(DEFAULT_SETTINGS.mcpServerUrl).setValue(this.plugin.settings.mcpServerUrl).onChange(async (value) => {
       this.plugin.settings.mcpServerUrl = value || DEFAULT_SETTINGS.mcpServerUrl;
       await this.plugin.saveSettings();

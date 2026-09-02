@@ -70,82 +70,171 @@ interface PublishResult {
 // ========================================
 
 /**
+ * ファイル先頭のfrontmatterブロック（--- ... ---）の位置と中身の行を返す。
+ * frontmatterが無ければnull。
+ */
+interface FrontmatterBlock {
+    /** 閉じフェンス行の改行までを含む、frontmatterブロック全体の終端インデックス */
+    endIndex: number;
+    /** フェンスに挟まれた中身の行 */
+    lines: string[];
+}
+
+function parseFrontmatterBlock(content: string): FrontmatterBlock | null {
+    // frontmatterはファイル先頭の --- 行から始まるものだけを対象にする
+    const opening = content.match(/^---[ \t]*\r?\n/);
+    if (!opening) return null;
+
+    const innerStart = opening[0].length;
+    const rest = content.slice(innerStart);
+
+    // 閉じフェンス（行頭の --- または ...）
+    const closing = rest.match(/^(?:---|\.\.\.)[ \t]*(?:\r?\n|$)/m);
+    if (!closing || closing.index === undefined) return null;
+
+    const innerText = rest.slice(0, closing.index);
+    const endIndex = innerStart + closing.index + closing[0].length;
+    const lines = innerText === ''
+        ? []
+        : innerText.replace(/\r?\n$/, '').split(/\r?\n/);
+
+    return { endIndex, lines };
+}
+
+/**
+ * トップレベルのキー行なら、そのキー名を返す。
+ * インデントされた行・リスト項目（- ...）・コメント行はキー行ではない。
+ */
+function topLevelKeyOf(line: string): string | null {
+    const match = line.match(/^([A-Za-z0-9_][A-Za-z0-9_\-. ]*?)[ \t]*:(?:[ \t].*)?$/);
+    return match ? match[1] : null;
+}
+
+/**
+ * 直前のキーに属する継続行かどうか。
+ * インデント行・リスト項目・空行が該当する（リストやブロックスカラーの中身）。
+ */
+function isContinuationLine(line: string): boolean {
+    if (line.trim() === '') return true;
+    if (/^[ \t]/.test(line)) return true;
+    if (/^-(?:[ \t]|$)/.test(line)) return true;
+    return false;
+}
+
+/** YAMLのプレーンスカラーとして書けない値かどうか */
+function needsYamlQuoting(value: string): boolean {
+    if (value === '') return true;
+    if (value !== value.trim()) return true;              // 前後に空白がある
+    if (/[\r\n\t]/.test(value)) return true;              // 改行・タブを含む
+    if (value.includes(':')) return true;                 // key: value と誤読されうる
+    if (/^[-?,[\]{}#&*!|>'"%@`]/.test(value)) return true; // YAMLの指示文字で始まる
+    if (/\s#/.test(value)) return true;                   // 行内コメントに見える
+    if (/^(?:true|false|null|yes|no|on|off|~)$/i.test(value)) return true;  // 真偽値・null
+    if (/^[+-]?\d[\d_]*(?:\.\d*)?(?:[eE][+-]?\d+)?$/.test(value)) return true;  // 数値に見える
+    if (/^0[bxo]/i.test(value)) return true;              // 2進・16進・8進に見える
+    return false;
+}
+
+/** 値をYAMLのスカラー表記にする */
+function toYamlScalar(value: any): string {
+    if (typeof value === 'number' || typeof value === 'boolean') {
+        return String(value);
+    }
+    if (Array.isArray(value)) {
+        return `[${value.map(v => toYamlScalar(v)).join(', ')}]`;
+    }
+    const text = String(value);
+    if (!needsYamlQuoting(text)) return text;
+    const escaped = text
+        .replace(/\\/g, '\\\\')
+        .replace(/"/g, '\\"')
+        .replace(/\r?\n/g, '\\n')
+        .replace(/\t/g, '\\t');
+    return `"${escaped}"`;
+}
+
+/**
+ * frontmatterの行配列に更新を適用する。
+ *
+ * 更新対象のキーの行（およびそのリスト・ブロックスカラーの継続行）だけを差し替え、
+ * それ以外の行は一切触らない。以前は「全体をパースして作り直す」実装だったため、
+ * 投稿のたびに以下が壊れていた:
+ *   - tags / aliases などのリストが丸ごと消える（`tags: ""` になる）
+ *   - `description: |` などのブロックスカラーの中身が消え、YAMLとして不正になる
+ *   - frontmatter内のコメント行が消える
+ *   - クォート付きの値からクォートが外れる（`"[[link]]"` → `[[link]]`）
+ *   - ネストしたキーがトップレベルへ引き上げられる
+ */
+function applyFrontmatterUpdates(lines: string[], updates: Record<string, any>): string[] {
+    const result = lines.slice();
+
+    for (const [key, value] of Object.entries(updates)) {
+        // 対象キーの行と、それに属する継続行の範囲を探す
+        let keyIndex = -1;
+        for (let i = 0; i < result.length; i++) {
+            if (topLevelKeyOf(result[i]) === key) {
+                keyIndex = i;
+                break;
+            }
+        }
+
+        if (keyIndex === -1) {
+            // 未定義のキー: 削除指示なら何もせず、それ以外は末尾に追加
+            if (value !== null && value !== undefined) {
+                result.push(`${key}: ${toYamlScalar(value)}`);
+            }
+            continue;
+        }
+
+        let blockEnd = keyIndex + 1;
+        while (blockEnd < result.length && isContinuationLine(result[blockEnd])) {
+            blockEnd++;
+        }
+        // 末尾の空行はこのキーのブロックに含めない
+        while (blockEnd > keyIndex + 1 && result[blockEnd - 1].trim() === '') {
+            blockEnd--;
+        }
+
+        if (value === null || value === undefined) {
+            result.splice(keyIndex, blockEnd - keyIndex);
+        } else {
+            result.splice(keyIndex, blockEnd - keyIndex, `${key}: ${toYamlScalar(value)}`);
+        }
+    }
+
+    return result;
+}
+
+/**
  * frontmatterを更新する
  * @param app Obsidian App
  * @param file 対象ファイル
- * @param updates 更新するフィールド
+ * @param updates 更新するフィールド（値がnull/undefinedのキーは削除）
  */
 async function updateFrontmatter(app: App, file: TFile, updates: Record<string, any>): Promise<void> {
     const content = await app.vault.read(file);
-    const frontmatterRegex = /^---\s*\n([\s\S]*?)\n---\s*\n?/;
-    const match = content.match(frontmatterRegex);
+    const block = parseFrontmatterBlock(content);
 
     let newContent: string;
 
-    if (match) {
-        // 既存のfrontmatterを解析
-        const frontmatterStr = match[1];
-        const frontmatterLines = frontmatterStr.split('\n');
-        const frontmatterObj: Record<string, any> = {};
-
-        // 簡易YAML解析（単純なkey: value形式のみ対応）
-        for (const line of frontmatterLines) {
-            const colonIndex = line.indexOf(':');
-            if (colonIndex > 0) {
-                const key = line.substring(0, colonIndex).trim();
-                let value = line.substring(colonIndex + 1).trim();
-                // クォートを除去
-                if ((value.startsWith('"') && value.endsWith('"')) || 
-                    (value.startsWith("'") && value.endsWith("'"))) {
-                    value = value.slice(1, -1);
-                }
-                frontmatterObj[key] = value;
-            }
-        }
-
-        // 更新を適用
-        for (const [key, value] of Object.entries(updates)) {
-            if (value === null || value === undefined) {
-                delete frontmatterObj[key];
-            } else {
-                frontmatterObj[key] = value;
-            }
-        }
-
-        // frontmatterを再構築
-        const newFrontmatterLines: string[] = [];
-        for (const [key, value] of Object.entries(frontmatterObj)) {
-            if (value === '' || value === null || value === undefined) {
-                // 空文字列の場合はキーのみ出力
-                newFrontmatterLines.push(`${key}: ""`);
-            } else if (typeof value === 'string' && (value.includes(':') || value.includes('#') || value.includes('"'))) {
-                // 特殊文字を含む場合はクォート
-                newFrontmatterLines.push(`${key}: "${value.replace(/"/g, '\\"')}"`);
-            } else {
-                newFrontmatterLines.push(`${key}: ${value}`);
-            }
-        }
-
-        const newFrontmatter = `---\n${newFrontmatterLines.join('\n')}\n---\n`;
-        newContent = content.replace(frontmatterRegex, newFrontmatter);
+    if (block) {
+        const newLines = applyFrontmatterUpdates(block.lines, updates);
+        const newFrontmatter = `---\n${newLines.join('\n')}\n---\n`;
+        // replace()の置換文字列では $& などが特殊扱いされるため、slice で連結する
+        newContent = newFrontmatter + content.slice(block.endIndex);
     } else {
         // frontmatterがない場合は新規作成
-        const newFrontmatterLines: string[] = [];
+        const newLines: string[] = [];
         for (const [key, value] of Object.entries(updates)) {
             if (value !== null && value !== undefined) {
-                if (value === '') {
-                    newFrontmatterLines.push(`${key}: ""`);
-                } else if (typeof value === 'string' && (value.includes(':') || value.includes('#') || value.includes('"'))) {
-                    newFrontmatterLines.push(`${key}: "${value.replace(/"/g, '\\"')}"`);
-                } else {
-                    newFrontmatterLines.push(`${key}: ${value}`);
-                }
+                newLines.push(`${key}: ${toYamlScalar(value)}`);
             }
         }
-        const newFrontmatter = `---\n${newFrontmatterLines.join('\n')}\n---\n\n`;
-        newContent = newFrontmatter + content;
+        if (newLines.length === 0) return;
+        newContent = `---\n${newLines.join('\n')}\n---\n\n` + content;
     }
 
+    if (newContent === content) return;
     await app.vault.modify(file, newContent);
 }
 
@@ -389,7 +478,10 @@ function extractTitle(content: string, file: TFile, cache: any): string {
     if (frontmatter?.title) {
         return String(frontmatter.title);
     }
-    const h1Match = content.match(/^#\s+(.+)$/m);
+    // frontmatter内のコメント行（# メモ）をH1と誤認しないよう、本文から探す
+    const block = parseFrontmatterBlock(content);
+    const body = block ? content.slice(block.endIndex) : content;
+    const h1Match = body.match(/^#\s+(.+)$/m);
     if (h1Match) {
         return h1Match[1].trim();
     }
@@ -717,9 +809,9 @@ function convertMarkdownToNoteHtml(markdown: string): string {
 }
 
 function prepareBody(content: string, conversionMode: ConversionMode): string {
-    let body = content;
-    // frontmatterを除去
-    body = body.replace(/^---\s*\n[\s\S]*?\n---\s*\n?/, '');
+    // frontmatterを除去（updateFrontmatterと同じパーサを使う）
+    const block = parseFrontmatterBlock(content);
+    let body = block ? content.slice(block.endIndex) : content;
     // 先頭のH1タイトル行を除去（タイトルはfrontmatterまたはこの行からextractTitleで取得済み）
     body = body.replace(/^#\s+.+\n*/, '');
     body = body.trim();
@@ -982,7 +1074,7 @@ class NotePublisherSettingTab extends PluginSettingTab {
         const { containerEl } = this;
         containerEl.empty();
 
-        containerEl.createEl('h2', { text: 'Note Publisher Settings (v1.2.15)' });
+        containerEl.createEl('h2', { text: 'Note Publisher Settings (v1.2.16)' });
 
         new Setting(containerEl)
             .setName('MCP Server URL')
